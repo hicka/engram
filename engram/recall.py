@@ -217,6 +217,34 @@ class Recall:
             if not dup:
                 kept.append(c)
 
+        # Silent resurrection: when nothing active answered but a silent
+        # memory matches the cue strongly, wake it. Only fires on an
+        # otherwise-empty recall, so it can never add distractors.
+        if not kept and qvec is not None:
+            for sid, scos in self.store.silent_search(qvec, 2):
+                if scos < self.cfg.resurrect_cosine:
+                    break
+                if dry_run:
+                    scored.append({"id": sid, "title": "(silent match)", "gist": "",
+                                   "created_ts": time.time(), "cos": round(scos, 3),
+                                   "bm25": 0.0, "nmatch": 0, "activation": 0.0,
+                                   "beta": 0.0, "source": "silent",
+                                   "score": 0.0, "admitted": False, "_emb": None})
+                    continue
+                self.store.resurrect(sid)
+                self.store.add_access(sid, self.cfg.w_create)
+                row = self.store.get_traces([sid]).get(sid)
+                if row is not None:
+                    kept.append({
+                        "id": sid, "title": row["title"], "gist": row["gist"],
+                        "created_ts": row["created_ts"], "cos": round(scos, 3),
+                        "bm25": 0.0, "nmatch": 0, "activation": 0.0,
+                        "beta": round(row["beta"] or 0.0, 2),
+                        "source": row["source"] if "source" in row.keys() else "user",
+                        "score": round(scos, 3), "admitted": True,
+                        "resurrected": True, "_emb": row["embedding"],
+                    })
+
         profile_text = None
         if AGG_RE.search(cue):
             prow = self.store.get_profile()

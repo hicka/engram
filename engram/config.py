@@ -85,6 +85,10 @@ class Config:
     silence_activation: float = -3.5
     silence_min_age_days: float = 30.0
     decay_sweep_cooldown_s: float = 21600.0  # 6h between sweeps
+    # A cue this similar to a SILENT memory resurrects it when no active
+    # memory answered: availability is not accessibility, but a strong
+    # enough cue reopens the path (fires only when nothing active admitted).
+    resurrect_cosine: float = 0.45
 
     # adaptive injection: budget scales with what the upstream model can
     # actually exploit (sub-7B peaks at 2-4 passages; big/cloud models more).

@@ -188,7 +188,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <li><b>Use strengthens.</b> Retrieval counts as re-presentation (the testing effect) at loop-safe weights, capped per session.</li>
 <li><b>Corrections supersede.</b> Update markers ("actually…", "changed to…") or conflicting values silence the stale trace and keep it on record.</li>
 <li><b>Consolidation.</b> During idle, user-stated memories distill into a profile schema; aggregate questions ("what do you know about me") inject it. Single-level by design - profiles never build from previous profiles, so no compounding drift.</li>
-<li><b>Forgetting is retrieval failure.</b> Unpinned traces below the activation line past 30 days drift to silent - recoverable via <code>memory_search include_silent</code>, invisible to injection. A lone unreinforced mention lives ~46 days.</li>
+<li><b>Forgetting is retrieval failure.</b> Unpinned traces below the activation line past 30 days drift to silent - invisible to injection but never gone. A strong direct cue (cosine &ge; 0.45 when nothing active answers) resurrects a silent memory automatically, and <code>memory_search include_silent</code> reaches them explicitly. A lone unreinforced mention lives ~46 days.</li>
 <li><b>The graph primes.</b> Traces link temporally (6h co-allocation window), semantically, and on co-retrieval; what was recalled last turn makes its neighbors easier to recall this turn, with fan damping so hubs can't dominate.</li>
 </ul>
 

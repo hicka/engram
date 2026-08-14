@@ -311,6 +311,25 @@ def test_profile_store_roundtrip():
         assert s.db.execute("SELECT COUNT(*) c FROM schemas").fetchone()["c"] == 1
 
 
+def test_silent_resurrection():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        v = np.array([1, 0, 0, 0], dtype=np.float32)
+        tid = s.add_trace(1, "old fact", "the legacy system used port 7070", "s1", v, "llm",
+                          fts_extra="legacy port 7070")
+        s.silence(tid)
+        assert tid not in [t for t, _ in s.dense_search(v, 5)]   # gone from active
+        assert not s.fts_search(["legacy"])                       # gone from lexical
+        hits = s.silent_search(v, 3)
+        assert hits and hits[0][0] == tid and hits[0][1] > 0.99   # shadow index finds it
+        s.resurrect(tid)
+        assert s.get_traces([tid])[tid]["status"] == "active"
+        assert s.dense_search(v, 5)[0][0] == tid                  # back in both indexes
+        assert s.fts_search(["legacy"])[0][0] == tid
+
+
 def test_store_supersede():
     import tempfile
 

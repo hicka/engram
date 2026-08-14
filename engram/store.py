@@ -157,19 +157,51 @@ class Store:
     # ---------- dense index ----------
 
     def _rebuild_index(self):
-        rows = self.db.execute(
-            "SELECT id, embedding FROM traces WHERE status='active' AND embedding IS NOT NULL"
-        ).fetchall()
-        ids, vecs = [], []
-        for r in rows:
-            v = np.frombuffer(r["embedding"], dtype=np.float32)
-            if v.shape[0] == self.embed_dim:
-                ids.append(r["id"])
-                vecs.append(v)
-        self._ids = ids
-        self._mat = (
-            np.vstack(vecs) if vecs else np.zeros((0, self.embed_dim), dtype=np.float32)
+        def build(status):
+            rows = self.db.execute(
+                "SELECT id, embedding FROM traces WHERE status=? AND embedding IS NOT NULL",
+                (status,),
+            ).fetchall()
+            ids, vecs = [], []
+            for r in rows:
+                v = np.frombuffer(r["embedding"], dtype=np.float32)
+                if v.shape[0] == self.embed_dim:
+                    ids.append(r["id"])
+                    vecs.append(v)
+            mat = np.vstack(vecs) if vecs else np.zeros((0, self.embed_dim), dtype=np.float32)
+            return ids, mat
+
+        self._ids, self._mat = build("active")
+        # Silent memories keep a shadow index: availability without
+        # accessibility, until a strong enough cue resurrects one.
+        self._silent_ids, self._silent_mat = build("silent")
+
+    def silent_search(self, qvec: np.ndarray, k: int = 3) -> list[tuple[int, float]]:
+        if getattr(self, "_silent_mat", None) is None or self._silent_mat.shape[0] == 0:
+            return []
+        sims = self._silent_mat @ qvec.astype(np.float32)
+        top = np.argsort(-sims)[:k]
+        return [(self._silent_ids[i], float(sims[i])) for i in top]
+
+    def resurrect(self, trace_id: int):
+        """A silenced memory answered a strong cue: back to active, back into
+        both indexes (the ecphory path for silent engrams)."""
+        row = self.db.execute(
+            "SELECT t.id, t.title, t.gist, e.user_text FROM traces t"
+            " LEFT JOIN episodes e ON e.id=t.episode_id WHERE t.id=?",
+            (trace_id,),
+        ).fetchone()
+        if row is None:
+            return
+        self.db.execute("UPDATE traces SET status='active' WHERE id=?", (trace_id,))
+        self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (trace_id,))
+        extra = (row["user_text"] or "")[:400]
+        self.db.execute(
+            "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)",
+            (trace_id, row["title"], f"{row['gist']}\n{extra}".strip()),
         )
+        self.db.commit()
+        self._rebuild_index()
 
     def dense_search(self, qvec: np.ndarray, k: int = 40) -> list[tuple[int, float]]:
         if self._mat.shape[0] == 0:
