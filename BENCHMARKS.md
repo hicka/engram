@@ -41,7 +41,6 @@ chat model use them), because those failures have different owners.
 
 | answering model | retrieval | answer |
 |---|---|---|
-| qwen3:0.6b | 9/9 | 8/9 |
 | qwen3:1.7b | 9/9 | 9/9 |
 | qwen3:4b | 9/9 | 9/9 |
 
@@ -49,8 +48,9 @@ Probes cover: cross-session semantic recall, literal token recall
 (error codes, config values), names and dates, knowledge updates
 (vim -> Neovim style corrections), aggregate identity questions, plus two
 negative controls (an unrelated question must inject nothing; smalltalk must
-skip recall entirely). Retrieval is model-independent by construction; the
-0.6b answer miss is the answering model fumbling context it was given.
+skip recall entirely). Retrieval is model-independent by construction. Sub-1B answering models were
+tested and dropped from support: they fumble context they are correctly
+given (retrieval still scored 9/9; their answers did not).
 
 This is our own scenario, so treat it as a regression suite, not an
 independent benchmark. Runs are fully local and free.

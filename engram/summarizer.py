@@ -1,6 +1,6 @@
 """Write-behind summarizer: drains the job queue only when the proxy is idle.
 
-Asks qwen3:0.6b (/no_think sampling) for two plain lines TITLE:/GIST: parsed by
+Asks the summarizer model (non-thinking sampling) for two plain lines TITLE:/GIST: parsed by
 regex - never JSON, which small models reliably botch. Deterministic extractive
 fallback means correctness requires zero LLM competence.
 """

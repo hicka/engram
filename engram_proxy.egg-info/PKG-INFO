@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: engram-proxy
-Version: 0.3.0
+Version: 0.4.0
 Summary: Transparent memory sidecar for local and cloud LLMs - ACT-R activation scoring, provenance-aware formation, ~90ms recall, one SQLite file
 License: MIT License
         
@@ -41,7 +41,12 @@ Dynamic: license-file
 
 # Engram
 
-Give your local model a memory. One process, one SQLite file, zero code changes.
+Give your model a memory, local or cloud. One process, one SQLite file, zero code changes.
+
+[![ci](https://github.com/hicka/engram/actions/workflows/ci.yml/badge.svg)](https://github.com/hicka/engram/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/engram-proxy)](https://pypi.org/project/engram-proxy/) [![docs](https://img.shields.io/badge/docs-hicka.github.io%2Fengram-46E0E6)](https://hicka.github.io/engram/) ![license](https://img.shields.io/badge/license-MIT-green)
+
+![The Engram memory observatory: memories orbiting a neural core at radii set by their live activation](https://hicka.github.io/engram/observatory.png)
+*The built-in observatory at `/engram/ui`: memories orbit by activation, reinforced ones fall inward, decaying ones drift out.*
 
 Engram is a transparent proxy that sits between any client and Ollama. It recalls
 relevant memories from past sessions and injects them before the model answers
@@ -61,7 +66,7 @@ the background - using the same small model you're chatting with.
 ## Install
 
 ```bash
-pip install git+https://github.com/hicka/engram.git    # or: uvx --from git+https://github.com/hicka/engram engram up
+pip install engram-proxy    # or: uvx --from engram-proxy engram up
 ollama pull qwen3:1.7b qwen3-embedding:0.6b
 ```
 
@@ -72,9 +77,9 @@ engram up
 
 # in another terminal - stock ollama, now with memory:
 export OLLAMA_HOST=127.0.0.1:11435
-ollama run qwen3:0.6b "I'm Sam. My cat is Miso and I'm badly allergic to peanuts."
+ollama run qwen3:1.7b "I'm Sam. My cat is Miso and I'm badly allergic to peanuts."
 # ... later, in a NEW session:
-ollama run qwen3:0.6b "Ordering Thai tonight - anything I should avoid?"
+ollama run qwen3:1.7b "Ordering Thai tonight - anything I should avoid?"
 ```
 
 Requires Ollama with `qwen3:1.7b` (summarizer) and `qwen3-embedding:0.6b`
@@ -96,6 +101,8 @@ engram stats            store counts, queue depth, degraded recalls
 engram bench            measure embed + recall latency on your machine
 ```
 
+Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
+
 ## Design in one paragraph
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
@@ -106,11 +113,20 @@ hybrid BM25 + brute-force dense with **admission on raw thresholds** (unrelated
 turns inject nothing), ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
-so the rich-get-richer loop stays closed. Injection is budgeted for small
+so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;
+silent memories resurrect on strong cues. Injection is budgeted for small
 models: ≤2 gists + 2 titles, ≤350 tokens, placed first in the system message.
 Failures fail open: a slow or broken pipeline degrades to a plain proxy.
 
 Full architecture spec: see the published design document.
+
+## For coding agents
+
+The repo ships an agent-consumable skill at `skills/engram-integration/SKILL.md`
+(standard SKILL.md format: Claude Code, OpenClaw, and Hermes all read it).
+Point your agent at it, or just say "integrate engram into my setup", and it
+walks the full recipe: preflight, install, per-client wiring, verification,
+and the gotchas that cost us real debugging time.
 
 ## Cloud models
 

@@ -264,7 +264,7 @@ def main():
     sp.add_argument("--synthetic", type=int, default=0, metavar="N",
                     help="benchmark against a throwaway store seeded with N synthetic traces")
     sp = sub.add_parser("eval", help="run the scripted memory regression scenario")
-    sp.add_argument("--model", default=None, help="answering model to wrap (default qwen3:0.6b)")
+    sp.add_argument("--model", default=None, help="answering model to wrap (default qwen3:1.7b)")
     sub.add_parser("mcp", help="run the memory-verbs MCP server on stdio")
     sub.add_parser("profile", help="show the consolidated user profile")
     sp = sub.add_parser("lapse", help="advance the decay clock (testing/demos)")

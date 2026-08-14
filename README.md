@@ -43,9 +43,9 @@ ollama run qwen3:1.7b "Ordering Thai tonight - anything I should avoid?"
 
 Requires Ollama with `qwen3:1.7b` (summarizer) and `qwen3-embedding:0.6b`
 (retrieval) - `ollama pull qwen3:1.7b qwen3-embedding:0.6b`, ~2 GB total.
-Field-tested defaults: a 0.6b summarizer garbles facts ("allergic to peanuts"
-became "a brave statement"), so 1.7b is the default; without it, summaries
-fall back to extractive, which also preserves facts. Set
+Field-tested defaults: sub-1B summarizers garble facts, so qwen3:1.7b is the
+default; without it, summaries fall back to extractive, which also preserves
+facts. Set
 `ENGRAM_SUMMARIZER_MODEL` / `ENGRAM_EMBED_MODEL` to override
 (`nomic-embed-text` is ~3x faster to embed but measurably worse at admission).
 
@@ -65,7 +65,7 @@ Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
 ## Design in one paragraph
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
-worker - running only when the GPU is idle - asks qwen3:0.6b for two plain
+worker - running only when the GPU is idle - asks qwen3:1.7b for two plain
 lines (`TITLE:` / `GIST:`; never JSON, with a deterministic extractive fallback)
 and embeds the gist (qwen3-embedding, Matryoshka-truncated to 256d). Recall is
 hybrid BM25 + brute-force dense with **admission on raw thresholds** (unrelated

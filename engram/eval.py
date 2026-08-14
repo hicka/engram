@@ -23,7 +23,7 @@ from .proxy import make_app
 
 PORT = 11499
 BASE = f"http://127.0.0.1:{PORT}"
-DEFAULT_MODEL = "qwen3:0.6b"  # the model being wrapped; override with --model
+DEFAULT_MODEL = "qwen3:1.7b"  # the model being wrapped; override with --model
 
 SEED_SESSIONS = [
     ("personal", [
@@ -52,7 +52,7 @@ SEED_SESSIONS = [
 ]
 
 # block: needles that must appear in the injected memory block (retrieval).
-# reply: needles for the model's answer (informational - 0.6b is stochastic).
+# reply: needles for the model's answer (informational - small models are stochastic).
 # any_of: any single needle passes instead of all.
 PROBES = [
     dict(name="P1-semantic-hop", q="I'm ordering Thai food for dinner tonight, anything I should avoid?",

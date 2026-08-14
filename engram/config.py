@@ -21,7 +21,7 @@ class Config:
         )
     )
     embed_model: str = os.environ.get("ENGRAM_EMBED_MODEL", "qwen3-embedding:0.6b")
-    # Field-tested 2026-08-14: qwen3:0.6b as summarizer destroys facts
+    # Field-tested 2026-08-14: sub-1B summarizers destroy facts
     # ("badly allergic to peanuts" -> "a brave statement about courage");
     # qwen3:1.7b keeps them verbatim. If the model isn't pulled, summarization
     # falls back to extractive, which also preserves facts - so 1.7b is a
