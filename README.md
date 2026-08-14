@@ -2,6 +2,11 @@
 
 Give your local model a memory. One process, one SQLite file, zero code changes.
 
+[![PyPI](https://img.shields.io/pypi/v/engram-proxy)](https://pypi.org/project/engram-proxy/) [![docs](https://img.shields.io/badge/docs-hicka.github.io%2Fengram-46E0E6)](https://hicka.github.io/engram/) ![license](https://img.shields.io/badge/license-MIT-green)
+
+![The Engram memory observatory: memories orbiting a neural core at radii set by their live activation](https://hicka.github.io/engram/observatory.png)
+*The built-in observatory at `/engram/ui`: memories orbit by activation, reinforced ones fall inward, decaying ones drift out.*
+
 Engram is a transparent proxy that sits between any client and Ollama. It recalls
 relevant memories from past sessions and injects them before the model answers
 (~22 ms overhead, no LLM on the request path), then summarizes each exchange in

@@ -199,6 +199,9 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <p class="d">Injected blocks are stripped before storage (Engram never re-summarizes its own output), byte-identical retries dedup at half weight, and <code>ENGRAM_QUARANTINE</code> can bar any source from injection entirely while staying searchable.</p>
 
 <h2 id="observatory">The observatory</h2>
+<a href="observatory.png" style="display:block;margin:10px 0 16px;border:1px solid var(--line);border-radius:5px;overflow:hidden;max-width:820px">
+  <img src="observatory.png" alt="The Engram memory observatory showing memories orbiting a neural core by activation" style="display:block;width:100%;height:auto">
+</a>
 <p>Open <code>/engram/ui</code>: memories orbit a neural core at a radius set by their live activation - reinforced memories fall inward, decaying ones drift out, recalls flare ember, pinned traces wear a ring, silent and superseded history dims at the rim. Press <b>/</b> to search; click any mote for its full dossier (gist, β importance, access history, provenance). It polls the daemon every 4s and doubles as the debugging surface: if recall surprises you, look at the sky.</p>
 
 <h2 id="cloud">Cloud models</h2>
