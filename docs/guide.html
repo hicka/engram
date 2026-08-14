@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engram Documentation</title>
+<style>
+  :root {
+    --void:#070B12; --panel:#0B121D; --synapse:#46E0E6; --synapse-dim:#1E8B90;
+    --ember:#E0913F; --text:#CDDBE1; --faint:#68798a; --line:rgba(70,224,230,0.15);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--void);color:var(--text);font-family:ui-monospace,"SF Mono","Menlo",monospace;font-size:14px;line-height:1.75}
+  a{color:var(--synapse);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:230px 1fr;max-width:1100px;margin:0 auto;gap:40px;padding:0 24px}
+  @media(max-width:860px){.layout{grid-template-columns:1fr}nav.side{position:static;height:auto;border:none;padding-top:20px}}
+  nav.side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:36px 0;border-right:1px solid rgba(94,114,128,0.12);font-size:12px}
+  nav.side .wm{font-family:"Futura","Avenir Next",sans-serif;letter-spacing:0.3em;color:var(--synapse);font-size:16px;margin-bottom:22px;display:block}
+  nav.side a{display:block;color:var(--faint);padding:4px 0;letter-spacing:0.04em}
+  nav.side a:hover{color:var(--synapse);text-decoration:none}
+  nav.side .g{color:var(--synapse-dim);letter-spacing:0.2em;font-size:10px;text-transform:uppercase;margin:16px 0 4px}
+  main{padding:36px 0 100px;min-width:0}
+  h1{font-family:"Futura","Avenir Next",sans-serif;font-weight:500;font-size:30px;letter-spacing:0.04em;margin-bottom:8px}
+  .vtag{color:var(--faint);font-size:12px;margin-bottom:30px}
+  h2{font-family:"Futura","Avenir Next",sans-serif;font-weight:500;font-size:21px;letter-spacing:0.05em;color:var(--synapse);margin:52px 0 12px;padding-top:14px;border-top:1px solid rgba(94,114,128,0.15)}
+  h3{font-size:14px;color:var(--text);letter-spacing:0.08em;text-transform:uppercase;margin:26px 0 8px}
+  p{margin-bottom:12px;max-width:78ch}
+  p.d{color:var(--faint)}
+  ul{margin:0 0 12px 20px;max-width:75ch}
+  li{margin-bottom:6px;color:var(--faint)}
+  li b, p b{color:var(--text);font-weight:500}
+  code{background:var(--panel);border:1px solid rgba(94,114,128,0.2);border-radius:3px;padding:1px 6px;font-size:12.5px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px 16px;font-size:12.5px;line-height:1.7;overflow-x:auto;margin:12px 0 18px}
+  pre code{background:none;border:none;padding:0}
+  pre .c{color:var(--faint)}
+  .tbl{overflow-x:auto;margin:12px 0 18px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th{color:var(--synapse-dim);text-align:left;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;font-size:10.5px;padding:8px 12px;border-bottom:1px solid var(--line)}
+  td{padding:8px 12px;border-bottom:1px solid rgba(94,114,128,0.12);color:var(--faint);vertical-align:top}
+  td:first-child{color:var(--text);white-space:nowrap}
+  .note{border-left:2px solid var(--ember);background:rgba(224,145,63,0.06);padding:10px 16px;margin:14px 0;font-size:13px;color:var(--faint);max-width:78ch}
+  .note b{color:var(--ember)}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+  <a class="wm" href="index.html">ENGRAM</a>
+  <div class="g">Start</div>
+  <a href="#install">Install</a>
+  <a href="#quickstart">Quickstart</a>
+  <a href="#integrations">Integrations</a>
+  <div class="g">Reference</div>
+  <a href="#cli">CLI</a>
+  <a href="#endpoints">HTTP endpoints</a>
+  <a href="#config">Configuration</a>
+  <a href="#mcp">Memory verbs (MCP)</a>
+  <div class="g">Concepts</div>
+  <a href="#architecture">Architecture</a>
+  <a href="#lifecycle">Memory lifecycle</a>
+  <a href="#provenance">Provenance &amp; trust</a>
+  <a href="#observatory">The observatory</a>
+  <div class="g">More</div>
+  <a href="#cloud">Cloud models</a>
+  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="spec.pdf">Design spec (PDF)</a>
+  <a href="https://github.com/hicka/engram">GitHub</a>
+</nav>
+<main>
+<h1>Engram Documentation</h1>
+<div class="vtag">v0.3.0 · a transparent memory sidecar for local and cloud LLMs</div>
+
+<h2 id="install">Install</h2>
+<pre><code><span class="c"># the package (Python 3.11+)</span>
+pip install git+https://github.com/hicka/engram.git
+<span class="c"># or run without installing:</span>
+uvx --from git+https://github.com/hicka/engram engram up
+
+<span class="c"># the local models Engram uses for background work (~2 GB total)</span>
+ollama pull qwen3:1.7b qwen3-embedding:0.6b</code></pre>
+<p class="d">Requirements: <a href="https://ollama.com">Ollama</a> running locally (for retrieval embeddings and background summarization - required even when your chat model is in the cloud), Python 3.11+. Tested on macOS Apple Silicon; Linux should work identically.</p>
+
+<h2 id="quickstart">Quickstart</h2>
+<pre><code>engram up                      <span class="c"># proxy on :11435, forwarding to Ollama on :11434</span>
+
+<span class="c"># in another terminal: same ollama CLI, new port - that's the whole integration</span>
+export OLLAMA_HOST=127.0.0.1:11435
+ollama run qwen3:1.7b</code></pre>
+<p>Tell the model a fact. Quit. Start a <b>new</b> session and ask about it obliquely - the answer can only come from memory. Watch what happened with <code>engram why</code>, or open the live brain view at <a href="http://127.0.0.1:11435/engram/ui">127.0.0.1:11435/engram/ui</a>.</p>
+<p class="d">Memories form a few seconds <i>after</i> each exchange (background summarization waits for GPU idle), so a fact becomes recallable in the next session, not the same instant you say it.</p>
+
+<h2 id="integrations">Integrations</h2>
+<h3>Stock Ollama CLI / any OpenAI-compatible client</h3>
+<pre><code>export OLLAMA_HOST=127.0.0.1:11435        <span class="c"># ollama CLI</span>
+base_url = "http://127.0.0.1:11435/v1"    <span class="c"># OpenAI SDKs, Hermes Agent, etc.</span></code></pre>
+<h3>OpenClaw</h3>
+<pre><code><span class="c"># OpenClaw mandates Ollama's native API - Engram speaks it byte-faithfully</span>
+{ "models": { "providers": {
+  "engram": { "baseUrl": "http://127.0.0.1:11435", "api": "ollama" }
+} } }</code></pre>
+<h3>Anthropic-protocol clients (local memory for cloud models)</h3>
+<pre><code>ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io engram up
+<span class="c"># point the client's anthropic base_url at:</span>
+http://127.0.0.1:11435/anthropic</code></pre>
+<p class="d">Auth headers pass through untouched. The whole Messages surface follows the cloud upstream (count_tokens, batches, prefixed /v1/models included).</p>
+
+<h2 id="cli">CLI reference</h2>
+<div class="tbl"><table>
+<tr><th>command</th><th>what it does</th></tr>
+<tr><td>engram up</td><td>run the proxy daemon (also serves the observatory at /engram/ui)</td></tr>
+<tr><td>engram list [-n N]</td><td>recent traces: title, gist, access weight, origin</td></tr>
+<tr><td>engram recall "query"</td><td>dry-run recall: per-candidate scores, admission verdicts, the block that would inject. Never mutates the store.</td></tr>
+<tr><td>engram why</td><td>explain the last real injection, score by score</td></tr>
+<tr><td>engram profile</td><td>show the consolidated user profile</td></tr>
+<tr><td>engram stats</td><td>store counts, queue depth, degraded-recall counter</td></tr>
+<tr><td>engram bench [-n N]</td><td>measure embed + recall latency on your machine</td></tr>
+<tr><td>engram eval [--model M]</td><td>the built-in memory regression scenario: seeds a throwaway store over a scripted multi-session conversation, then scores retrieval and answers on 10 probes</td></tr>
+<tr><td>engram lapse 72h</td><td>advance the decay clock (testing/demos) - accepts 30m / 72h / 45d</td></tr>
+<tr><td>engram import file.md</td><td>bootstrap memories from a notes file (e.g. an agent's MEMORY.md), backdated so they neither flood recall nor arrive decayed</td></tr>
+<tr><td>engram mcp</td><td>run the memory-verbs MCP server on stdio</td></tr>
+</table></div>
+
+<h2 id="endpoints">HTTP endpoints</h2>
+<div class="tbl"><table>
+<tr><th>route</th><th>behavior</th></tr>
+<tr><td>POST /api/chat</td><td>Ollama-native NDJSON, memory-enabled</td></tr>
+<tr><td>POST /v1/chat/completions</td><td>OpenAI-compatible SSE, memory-enabled</td></tr>
+<tr><td>POST [/prefix]/v1/messages</td><td>Anthropic Messages (streams SSE), memory-enabled; routes to ENGRAM_ANTHROPIC_UPSTREAM when set</td></tr>
+<tr><td>/api/generate, /api/tags, /api/show, /v1/models, embeddings…</td><td>byte passthrough (raw completions are never injected - there is no safe injection point in a FIM prompt)</td></tr>
+<tr><td>GET /engram/ui</td><td>the observatory (live brain view)</td></tr>
+<tr><td>GET /engram/memories</td><td>JSON trace snapshot with live activation</td></tr>
+<tr><td>GET /engram/why · /engram/stats</td><td>last injection explained · store health</td></tr>
+</table></div>
+<p class="d">Per-request headers: <code>X-Engram: off</code> bypasses memory; <code>X-Engram-Session: id</code> pins session identity.</p>
+
+<h2 id="config">Configuration</h2>
+<p>Everything is environment variables; defaults are field-tested.</p>
+<div class="tbl"><table>
+<tr><th>variable</th><th>default</th><th>meaning</th></tr>
+<tr><td>ENGRAM_PORT</td><td>11435</td><td>proxy listen port</td></tr>
+<tr><td>ENGRAM_UPSTREAM</td><td>http://127.0.0.1:11434</td><td>chat forward target (OpenAI/Ollama routes)</td></tr>
+<tr><td>ENGRAM_ANTHROPIC_UPSTREAM</td><td>(empty)</td><td>where /v1/messages traffic goes - set to a cloud endpoint to give a cloud model memory</td></tr>
+<tr><td>ENGRAM_SERVICES</td><td>http://127.0.0.1:11434</td><td>local Ollama for embeddings, summarization, /api/ps - background work never leaves this</td></tr>
+<tr><td>ENGRAM_DB</td><td>~/.engram/engram.db</td><td>the store. Back it up with <code>sqlite3 … ".backup out.db"</code> (WAL mode makes bare cp copies stale)</td></tr>
+<tr><td>ENGRAM_EMBED_MODEL</td><td>qwen3-embedding:0.6b</td><td>retrieval embedder. nomic-embed-text is ~3× faster but measurably worse at telling related from unrelated cues</td></tr>
+<tr><td>ENGRAM_SUMMARIZER_MODEL</td><td>qwen3:1.7b</td><td>gist writer. 0.6b-class models destroy facts ("allergic to peanuts" → "a brave statement"); missing model falls back to extractive summaries</td></tr>
+<tr><td>ENGRAM_PROFILE_MODEL</td><td>(summarizer)</td><td>model for profile consolidation</td></tr>
+<tr><td>ENGRAM_QUARANTINE</td><td>(empty)</td><td>comma-separated source labels never injected, e.g. <code>observed</code> (all third-party) or <code>observed:Ops Team</code></td></tr>
+</table></div>
+
+<h2 id="mcp">Memory verbs (MCP)</h2>
+<p>Agents that can call tools get explicit memory verbs over the <b>same store</b> as the transparent proxy. Register <code>engram mcp</code> as a stdio MCP server in your agent framework.</p>
+<div class="tbl"><table>
+<tr><th>tool</th><th>teaches the agent to…</th></tr>
+<tr><td>memory_search</td><td>always check memory before answering about the user's past; <code>include_silent</code> shows superseded/forgotten history</td></tr>
+<tr><td>memory_save</td><td>persist a stated fact instantly (no waiting for background formation)</td></tr>
+<tr><td>memory_correct</td><td>fix a wrong/outdated memory - supersedes (history kept, never re-injected), never overwrites</td></tr>
+<tr><td>memory_edit</td><td>reword a garbled gist in place (for changed facts, use correct instead)</td></tr>
+<tr><td>memory_pin</td><td>mark permanently important: outranks everything, never decays, still supersedable</td></tr>
+<tr><td>memory_forget</td><td>silence (reversible) or, with hard=true, delete for privacy</td></tr>
+<tr><td>memory_profile</td><td>read (or refresh) the consolidated user profile</td></tr>
+<tr><td>memory_recent · memory_stats</td><td>newest traces · store health</td></tr>
+</table></div>
+
+<h2 id="architecture">Architecture</h2>
+<pre><code>client ──► engramd :11435 ──► upstream (Ollama :11434 / cloud)
+             │  recall: hybrid search + ACT-R activation (~90ms, no LLM)
+             │  inject: budgeted block, placement preserves prompt caches
+             │  tee: response streams byte-verbatim; shadow copy → episode log
+             └─ write-behind (GPU-idle only): summarize → embed → link → store
+                     └── engram.db  (SQLite WAL: traces, episodes, links,
+                                     schemas, FTS5, vectors, job queue)</code></pre>
+<ul>
+<li><b>Recall is pure arithmetic.</b> One capped embedder call at most; hard deadline; any failure = uninjected passthrough. Memory is an enhancement, never a gate.</li>
+<li><b>Admission before ranking.</b> A trace must clear <i>raw</i> relevance thresholds (cosine, or literal token matches) before activation orders anything - so "inject nothing" is the default on unrelated turns, which is what protects small models from distractors.</li>
+<li><b>Adaptive budgets.</b> The upstream model is probed once: &lt;4B params → 2 gists / 350 tokens; 4–14B → 4 / 1000; ≥14B and cloud → 6 / 2000.</li>
+<li><b>Cache-preserving injection.</b> Prompts over ~4k tokens get the block on the newest user message, leaving the cached prefix byte-identical - measured 90s → 2s per turn locally, and it preserves cloud providers' cache-read discounts.</li>
+</ul>
+
+<h2 id="lifecycle">Memory lifecycle</h2>
+<ul>
+<li><b>Formation is picky.</b> Pure questions, smalltalk, and framework plumbing never become memories. Statements are summarized with user-fact primacy (exact names and values; assistant elaboration ignored) with a deterministic extractive fallback.</li>
+<li><b>Use strengthens.</b> Retrieval counts as re-presentation (the testing effect) at loop-safe weights, capped per session.</li>
+<li><b>Corrections supersede.</b> Update markers ("actually…", "changed to…") or conflicting values silence the stale trace and keep it on record.</li>
+<li><b>Consolidation.</b> During idle, user-stated memories distill into a profile schema; aggregate questions ("what do you know about me") inject it. Single-level by design - profiles never build from previous profiles, so no compounding drift.</li>
+<li><b>Forgetting is retrieval failure.</b> Unpinned traces below the activation line past 30 days drift to silent - recoverable via <code>memory_search include_silent</code>, invisible to injection. A lone unreinforced mention lives ~46 days.</li>
+<li><b>The graph primes.</b> Traces link temporally (6h co-allocation window), semantically, and on co-retrieval; what was recalled last turn makes its neighbors easier to recall this turn, with fan damping so hubs can't dominate.</li>
+</ul>
+
+<h2 id="provenance">Provenance &amp; trust</h2>
+<p>Every memory records whose words it came from:</p>
+<ul>
+<li><b>user</b> - the human. Full strength, eligible for salience boosts (corrections, "important", names, deadlines).</li>
+<li><b>observed:&lt;name&gt;</b> - third parties relayed by a gateway (group chats a bot observes). Half-weighted, <b>never</b> salience-boosted (imperatives from strangers are the grammar of injection attacks), rendered as "(reported by X, unverified)", and structurally unable to supersede anything the user said.</li>
+<li><b>system</b> - agent-framework plumbing arriving as user-role turns. Never becomes memory.</li>
+</ul>
+<p class="d">Injected blocks are stripped before storage (Engram never re-summarizes its own output), byte-identical retries dedup at half weight, and <code>ENGRAM_QUARANTINE</code> can bar any source from injection entirely while staying searchable.</p>
+
+<h2 id="observatory">The observatory</h2>
+<p>Open <code>/engram/ui</code>: memories orbit a neural core at a radius set by their live activation - reinforced memories fall inward, decaying ones drift out, recalls flare ember, pinned traces wear a ring, silent and superseded history dims at the rim. Press <b>/</b> to search; click any mote for its full dossier (gist, β importance, access history, provenance). It polls the daemon every 4s and doubles as the debugging surface: if recall surprises you, look at the sky.</p>
+
+<h2 id="cloud">Cloud models</h2>
+<p>Set <code>ENGRAM_ANTHROPIC_UPSTREAM</code> and point your client's Anthropic base_url at <code>http://127.0.0.1:11435/anthropic</code>. Chat goes to the cloud; embeddings, summarization, and consolidation stay on local Ollama, so the only added cloud cost is the injected block (≤2000 tokens on the cloud tier, typically far less - around 1% of a real agent prompt). Your memory store never leaves your machine.</p>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="tbl"><table>
+<tr><th>symptom</th><th>cause / fix</th></tr>
+<tr><td>address already in use</td><td>another engramd holds :11435 - <code>pkill -f "engram up"</code></td></tr>
+<tr><td>no memories form</td><td>check <code>engram stats</code> queue depth; the summarizer waits ~30s of GPU idle. Missing qwen3:1.7b → extractive summaries (still correct, terser)</td></tr>
+<tr><td>degraded_recalls climbing</td><td>embed calls exceeding the 250ms cap (GPU contention) - recall degrades to lexical-only for those turns and recovers on its own</td></tr>
+<tr><td>slow first turns through big agents</td><td>huge prompt prefill; subsequent turns should hit the prompt cache. If every turn is slow, something churns the prompt head upstream of Engram</td></tr>
+<tr><td>model answers ignore injected memory</td><td>sub-2B answering models fumble context they're given; the memory block is visible in <code>engram why</code> - verify retrieval vs answering separately, like <code>engram eval</code> does</td></tr>
+<tr><td>backup</td><td><code>sqlite3 ~/.engram/engram.db ".backup backup.db"</code> - never bare <code>cp</code> (WAL)</td></tr>
+</table></div>
+
+<p class="d" style="margin-top:50px">MIT licensed · <a href="https://github.com/hicka/engram">source</a> · <a href="spec.pdf">design specification</a> · built with a research-first process: every default in this page traces to a measurement or a field failure.</p>
+</main>
+</div>
+</body>
+</html>

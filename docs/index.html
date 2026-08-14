@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engram - give your model a memory</title>
+<meta name="description" content="A transparent memory sidecar for local and cloud LLMs. ACT-R activation scoring, provenance-aware formation, ~90ms recall, one SQLite file, zero code changes.">
+<style>
+  :root {
+    --void:#05080F; --panel:#0A111C; --synapse:#46E0E6; --synapse-dim:#1E8B90;
+    --ember:#E0913F; --text:#C8D8DE; --faint:#5E7280; --line:rgba(70,224,230,0.16);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--void);color:var(--text);font-family:ui-monospace,"SF Mono","Menlo",monospace;line-height:1.6;overflow-x:hidden}
+  a{color:var(--synapse);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible{outline:2px solid var(--synapse);outline-offset:2px}
+  canvas#bg{position:fixed;inset:0;z-index:0;opacity:0.8}
+  .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 24px}
+
+  /* hero */
+  header{min-height:88vh;display:flex;flex-direction:column;justify-content:center;padding:60px 0 40px}
+  .wordmark{font-family:"Futura","Avenir Next Condensed","Avenir Next",sans-serif;font-size:clamp(44px,9vw,84px);font-weight:500;letter-spacing:0.34em;color:var(--synapse);text-shadow:0 0 32px rgba(70,224,230,0.5)}
+  .tagline{font-size:clamp(15px,2.4vw,19px);color:var(--text);max-width:52ch;margin:18px 0 8px;line-height:1.7}
+  .tagline b{color:var(--synapse);font-weight:500}
+  .sub{color:var(--faint);font-size:13px;letter-spacing:0.06em;max-width:60ch}
+  .install{margin:34px 0 14px;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--synapse);border-radius:4px;padding:16px 20px;font-size:13.5px;overflow-x:auto;white-space:nowrap}
+  .install .c{color:var(--faint)}
+  .cta-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;font-size:12.5px;letter-spacing:0.08em}
+  .cta-row a{border:1px solid var(--line);padding:9px 18px;border-radius:3px}
+  .cta-row a.primary{background:rgba(70,224,230,0.09);border-color:var(--synapse-dim)}
+  .cta-row a:hover{text-decoration:none;border-color:var(--synapse)}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:30px 0 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px 16px}
+  .stat .n{font-family:"Futura","Avenir Next",sans-serif;font-size:24px;color:var(--synapse);font-variant-numeric:tabular-nums}
+  .stat .l{font-size:10px;color:var(--faint);letter-spacing:0.14em;text-transform:uppercase;margin-top:3px}
+
+  /* sections */
+  section{padding:70px 0}
+  .eyebrow{font-size:11px;letter-spacing:0.3em;color:var(--synapse-dim);text-transform:uppercase;margin-bottom:10px}
+  h2{font-family:"Futura","Avenir Next",sans-serif;font-size:clamp(22px,4vw,30px);font-weight:500;letter-spacing:0.04em;color:var(--text);margin-bottom:18px}
+  p.lead{color:var(--text);max-width:68ch;margin-bottom:14px}
+  p.dim{color:var(--faint);font-size:13px;max-width:68ch}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:20px}
+  .card h3{font-family:"Futura","Avenir Next",sans-serif;font-size:15px;font-weight:500;letter-spacing:0.08em;color:var(--synapse);margin-bottom:8px}
+  .card p{font-size:12.5px;color:var(--faint);line-height:1.7}
+  .card p b{color:var(--text);font-weight:500}
+
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px;font-size:12.5px;line-height:1.7;overflow-x:auto;margin-top:16px}
+  pre .c{color:var(--faint)}
+  pre .k{color:var(--ember)}
+
+  .steps{counter-reset:s;margin-top:24px}
+  .step{display:flex;gap:18px;padding:16px 0;border-top:1px solid rgba(94,114,128,0.15)}
+  .step::before{counter-increment:s;content:"0" counter(s);font-family:"Futura","Avenir Next",sans-serif;color:var(--synapse-dim);font-size:20px;min-width:40px}
+  .step div{font-size:13px;color:var(--faint);max-width:66ch}
+  .step b{color:var(--text);font-weight:500;display:block;margin-bottom:3px;font-size:13.5px}
+
+  footer{padding:50px 0 60px;border-top:1px solid rgba(94,114,128,0.15);font-size:12px;color:var(--faint);display:flex;gap:24px;flex-wrap:wrap}
+  @media (prefers-reduced-motion: reduce){ canvas#bg{display:none} }
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="wrap">
+
+<header>
+  <div class="wordmark">ENGRAM</div>
+  <p class="tagline">A transparent memory sidecar for local and cloud LLMs. Your model <b>remembers across sessions</b>, corrects itself, forgets what stops mattering, and knows <b>who told it what</b> - with zero changes to your client.</p>
+  <p class="sub">One process. One SQLite file. No Docker, no vector DB, no cloud account. Runs on models as small as 1.7B.</p>
+  <div class="install"><span class="c">$</span> pip install git+https://github.com/hicka/engram.git <span class="c"># or: uvx --from git+https://github.com/hicka/engram engram up</span></div>
+  <div class="cta-row">
+    <a class="primary" href="guide.html">DOCUMENTATION</a>
+    <a href="https://github.com/hicka/engram">GITHUB</a>
+    <a href="spec.pdf">DESIGN SPEC (PDF)</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">~90ms</div><div class="l">recall, measured</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">LLM calls on hot path</div></div>
+    <div class="stat"><div class="n">1 file</div><div class="l">sqlite, cp-able</div></div>
+    <div class="stat"><div class="n">0 code</div><div class="l">changes to clients</div></div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="eyebrow">How it works</div>
+  <h2>A proxy that impersonates your model server</h2>
+  <p class="lead">Point any OpenAI-, Ollama-, or Anthropic-protocol client at port 11435 instead of your model. Engram recalls relevant memories, injects a small budgeted block, forwards the request, and streams the response back byte-for-byte. Afterward - only when your GPU is idle - it summarizes the exchange into memory.</p>
+  <div class="steps">
+    <div class="step"><div><b>Recall - pure arithmetic, no LLM</b>Hybrid BM25 + dense search with admission on raw thresholds: unrelated turns inject nothing. Candidates are ranked by ACT-R activation - frequency and recency with power-law decay, plus write-time importance and graph priming.</div></div>
+    <div class="step"><div><b>Inject - budgeted for the model that's answering</b>Small local models get 2 gists (they measurably drown past 4 passages); 14B+ and cloud models get 6. Big agent prompts get the block on the newest message so provider prompt caches survive - measured 90s → 2s per turn on a 23k-token agent prompt.</div></div>
+    <div class="step"><div><b>Form - write-behind, provenance-aware</b>A background summarizer (only when the GPU is idle) distills each exchange. Your words form memory at full strength; third-party content a gateway relays is tagged, half-weighted, and can never overwrite what you said; framework plumbing never becomes memory at all.</div></div>
+    <div class="step"><div><b>Live - reinforce, supersede, consolidate, forget</b>Used memories strengthen and orbit closer. Corrections supersede (history kept, never re-injected). An idle-time consolidator maintains a user profile for "what do you know about me". Unused memories decay silent after weeks - recoverable, never deleted.</div></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="eyebrow">What's inside</div>
+  <h2>Memory science, not just similarity search</h2>
+  <div class="grid">
+    <div class="card"><h3>ACT-R ACTIVATION</h3><p>Scoring grounded in 50 years of cognitive science: <b>B = ln(Σ w·t⁻⁰·⁵)</b>. Frequent-and-recent surfaces first; retrieval itself reinforces (the testing effect) at loop-safe weights; the rich-get-richer spiral stays closed.</p></div>
+    <div class="card"><h3>PROVENANCE</h3><p>Every memory knows whose words it came from: <b>user</b>, <b>observed third parties</b>, or framework plumbing. Imperatives from strangers never earn salience - that grammar is what injection attacks look like.</p></div>
+    <div class="card"><h3>CORRECTIONS SUPERSEDE</h3><p>"Actually it's X now" silences the stale memory instead of feeding it. History stays auditable; temporal questions stay answerable; the correction outranks.</p></div>
+    <div class="card"><h3>MEMORY GRAPH</h3><p>Traces wire together - temporally, semantically, and by co-retrieval (Hebbian). Recalling one primes its neighbors next turn, with fan damping so hubs can't dominate.</p></div>
+    <div class="card"><h3>CLOUD, CHEAPLY</h3><p>Route Anthropic-protocol traffic to a cloud endpoint while embeddings and summarization stay on local Ollama. Added cloud cost: the injected block only - and cache-friendly placement keeps the provider's 5× cache-read discount.</p></div>
+    <div class="card"><h3>AGENT VERBS (MCP)</h3><p>Eight memory tools for agents that can call them: search (with history), save, correct, edit, pin, forget, profile, stats. Same store as the transparent proxy - ambient and explicit memory stay in sync.</p></div>
+    <div class="card"><h3>THE OBSERVATORY</h3><p>A live brain view at <b>/engram/ui</b>: memories orbit by activation, fall inward when reinforced, drift out as they decay, flare on recall. Search with <b>/</b>. Memory you can watch.</p></div>
+    <div class="card"><h3>FAILS OPEN</h3><p>Hard recall deadline; any failure forwards your request untouched. Byte-verbatim streaming, WAL crash safety, extractive fallbacks. Memory is an enhancement, never a gate.</p></div>
+  </div>
+</section>
+
+<section id="integrations">
+  <div class="eyebrow">Integrations</div>
+  <h2>One line per client</h2>
+<pre><span class="c"># stock Ollama CLI</span>
+<span class="k">export</span> OLLAMA_HOST=127.0.0.1:11435
+
+<span class="c"># OpenClaw (keeps its native-API mode)</span>
+{ "providers": { "engram": { "baseUrl": "http://127.0.0.1:11435", "api": "ollama" } } }
+
+<span class="c"># Hermes Agent, or any OpenAI-compatible client</span>
+base_url = "http://127.0.0.1:11435/v1"
+
+<span class="c"># Anthropic-protocol cloud (e.g. MiniMax) with local memory</span>
+ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io engram up
+<span class="c"># then point the client at http://127.0.0.1:11435/anthropic</span></pre>
+  <p class="dim" style="margin-top:14px">Requires <a href="https://ollama.com">Ollama</a> with <code>qwen3:1.7b</code> + <code>qwen3-embedding:0.6b</code> (~2 GB total) for background summarization and retrieval - even when your chat model is in the cloud.</p>
+</section>
+
+<footer>
+  <span>MIT licensed</span>
+  <a href="https://github.com/hicka/engram">github.com/hicka/engram</a>
+  <a href="guide.html">documentation</a>
+  <a href="spec.pdf">design spec</a>
+</footer>
+</div>
+
+<script>
+"use strict";
+const cv = document.getElementById("bg"), cx = cv.getContext("2d");
+let W, H, DPR;
+function rs(){ DPR = Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; cx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener("resize", rs); rs();
+const N=70, nodes=[];
+for(let i=0;i<N;i++){nodes.push({a:Math.random()*Math.PI*2,r:0.12+Math.random()*0.55,s:(0.02+Math.random()*0.05)*(Math.random()>0.5?1:-1),z:0.4+Math.random()*0.6});}
+let T=0;
+(function frame(){
+  T+=1/60; cx.clearRect(0,0,W,H);
+  const cxp=W*0.72, cyp=H*0.42, R=Math.min(W,H)*0.55;
+  for(const n of nodes){
+    n.a+=n.s*(1/60)*(0.4/n.r);
+    const x=cxp+Math.cos(n.a)*n.r*R, y=cyp+Math.sin(n.a)*n.r*R*0.8;
+    cx.fillStyle=`rgba(70,224,230,${0.10+0.25*n.z})`;
+    cx.beginPath(); cx.arc(x,y,1.1+n.z*1.6,0,Math.PI*2); cx.fill();
+  }
+  cx.fillStyle="rgba(70,224,230,0.06)";
+  cx.beginPath(); cx.arc(cxp,cyp,26+Math.sin(T*0.8)*3,0,Math.PI*2); cx.fill();
+  cx.strokeStyle="rgba(70,224,230,0.25)"; cx.lineWidth=1;
+  cx.beginPath(); cx.arc(cxp,cyp,16,T*0.3,T*0.3+4.4); cx.stroke();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

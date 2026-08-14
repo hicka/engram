@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENGRAM · memory observatory</title>
+<style>
+  :root {
+    --void: #05080F;
+    --synapse: #46E0E6;
+    --synapse-dim: #1E8B90;
+    --ember: #E0913F;
+    --slate: #3A4A5C;
+    --text: #C8D8DE;
+    --faint: #5E7280;
+    --hud-line: rgba(70, 224, 230, 0.18);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: var(--void); }
+  body {
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    color: var(--text);
+    cursor: crosshair;
+  }
+  canvas { position: fixed; inset: 0; display: block; }
+
+  /* ---------- HUD chrome ---------- */
+  .hud {
+    position: fixed; z-index: 10; pointer-events: none;
+    font-size: 11px; letter-spacing: 0.08em; color: var(--faint);
+  }
+  .hud strong { color: var(--text); font-weight: 500; }
+  .corner { padding: 18px 22px; }
+  .tl { top: 0; left: 0; }
+  .tr { top: 0; right: 0; text-align: right; }
+  .bl { bottom: 0; left: 0; }
+  .br { bottom: 0; right: 0; text-align: right; max-width: 44vw; }
+
+  .wordmark {
+    font-family: "Futura", "Avenir Next Condensed", "Avenir Next", sans-serif;
+    font-size: 21px; font-weight: 500; letter-spacing: 0.42em;
+    color: var(--synapse);
+    text-shadow: 0 0 18px rgba(70, 224, 230, 0.55);
+    margin-bottom: 4px;
+  }
+  .wordmark .dim { color: var(--faint); text-shadow: none; }
+  .sub { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; }
+
+  .stat-line { margin-top: 3px; }
+  .stat-line b { color: var(--synapse); font-weight: 500; }
+
+  .legend { line-height: 1.9; }
+  .legend .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 8px; vertical-align: 1px;
+  }
+  .dot.hot  { background: var(--synapse); box-shadow: 0 0 8px var(--synapse); }
+  .dot.cool { background: var(--synapse-dim); }
+  .dot.mute { background: var(--slate); }
+  .dot.dead { background: #6B5133; }
+
+  .cue { font-size: 10.5px; line-height: 1.6; }
+  .cue .label { color: var(--synapse-dim); letter-spacing: 0.22em; }
+  .cue .text { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 42vw; }
+
+  .pulse-status { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--synapse); margin-right: 7px; animation: beat 2.4s ease-in-out infinite; }
+  @keyframes beat { 0%,100% { opacity: 1; box-shadow: 0 0 6px var(--synapse); } 50% { opacity: 0.25; box-shadow: none; } }
+
+  /* frame lines */
+  .frame { position: fixed; z-index: 9; pointer-events: none; }
+  .frame.h { left: 22px; right: 22px; height: 1px; background: linear-gradient(90deg, var(--hud-line), transparent 30%, transparent 70%, var(--hud-line)); }
+  .frame.top { top: 64px; } .frame.bottom { bottom: 64px; }
+
+  /* ---------- search ---------- */
+  .search-wrap {
+    position: fixed; z-index: 15; top: 16px; left: 50%; transform: translateX(-50%);
+    width: min(420px, 60vw); pointer-events: auto;
+  }
+  #search {
+    width: 100%; background: rgba(7, 12, 20, 0.85);
+    border: 1px solid var(--hud-line); border-radius: 3px;
+    padding: 8px 12px; color: var(--text);
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace; font-size: 12px;
+    letter-spacing: 0.04em; outline: none;
+    backdrop-filter: blur(6px); transition: border-color 0.15s;
+  }
+  #search::placeholder { color: var(--faint); letter-spacing: 0.1em; }
+  #search:focus { border-color: var(--synapse-dim); box-shadow: 0 0 14px rgba(70,224,230,0.12); }
+  #search-count {
+    position: absolute; right: 10px; top: 8px; font-size: 10px;
+    color: var(--synapse-dim); letter-spacing: 0.1em; pointer-events: none;
+  }
+  #search-results {
+    margin-top: 4px; background: rgba(7, 12, 20, 0.93);
+    border: 1px solid var(--hud-line); border-radius: 3px;
+    backdrop-filter: blur(8px); display: none; max-height: 40vh; overflow-y: auto;
+  }
+  #search-results.open { display: block; }
+  .sr-item {
+    padding: 8px 12px; font-size: 11px; cursor: pointer;
+    border-bottom: 1px solid rgba(94, 114, 128, 0.12);
+    color: var(--text);
+  }
+  .sr-item:last-child { border-bottom: none; }
+  .sr-item:hover { background: rgba(70, 224, 230, 0.07); }
+  .sr-item .sr-id { color: var(--faint); font-size: 10px; margin-right: 8px; }
+  .sr-item .sr-status { float: right; color: var(--synapse-dim); font-size: 9.5px; letter-spacing: 0.08em; }
+
+  /* ---------- tooltip ---------- */
+  #tip {
+    position: fixed; z-index: 20; pointer-events: none;
+    background: rgba(7, 12, 20, 0.92);
+    border: 1px solid var(--hud-line);
+    border-left: 2px solid var(--synapse);
+    padding: 8px 12px; font-size: 11px; max-width: 320px;
+    color: var(--text); line-height: 1.5;
+    opacity: 0; transition: opacity 0.12s;
+    backdrop-filter: blur(4px);
+  }
+  #tip .t-id { color: var(--faint); font-size: 10px; letter-spacing: 0.12em; }
+
+  /* ---------- dossier panel ---------- */
+  #dossier {
+    position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; width: min(400px, 92vw);
+    background: linear-gradient(270deg, rgba(7, 12, 20, 0.97), rgba(7, 12, 20, 0.88));
+    border-left: 1px solid var(--hud-line);
+    padding: 84px 28px 28px;
+    transform: translateX(102%);
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+    backdrop-filter: blur(10px);
+    overflow-y: auto;
+  }
+  #dossier.open { transform: none; }
+  #dossier .d-kicker { font-size: 10px; letter-spacing: 0.3em; color: var(--synapse-dim); text-transform: uppercase; }
+  #dossier h2 {
+    font-family: "Futura", "Avenir Next", sans-serif;
+    font-size: 19px; font-weight: 500; color: var(--text);
+    margin: 10px 0 18px; line-height: 1.35; letter-spacing: 0.02em;
+  }
+  #dossier .d-gist {
+    font-size: 12.5px; line-height: 1.75; color: var(--text);
+    border-left: 2px solid var(--synapse-dim); padding-left: 14px; margin-bottom: 26px;
+  }
+  #dossier table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  #dossier td { padding: 7px 0; border-bottom: 1px solid rgba(94, 114, 128, 0.15); }
+  #dossier td:first-child { color: var(--faint); letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px; }
+  #dossier td:last-child { text-align: right; color: var(--text); }
+  #dossier .d-status { color: var(--synapse); }
+  #dossier .close-x {
+    position: absolute; top: 26px; right: 24px; cursor: pointer;
+    color: var(--faint); font-size: 18px; padding: 4px 8px;
+    border: 1px solid transparent;
+  }
+  #dossier .close-x:hover { color: var(--synapse); border-color: var(--hud-line); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-status { animation: none; }
+    #dossier { transition: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="cosmos"></canvas>
+
+<div class="hud corner tl">
+  <div class="wordmark">ENGRAM<span class="dim">·OS</span></div>
+  <div class="sub">memory observatory</div>
+</div>
+
+<div class="hud corner tr">
+  <div><span class="pulse-status"></span><strong id="h-count">-</strong> traces held</div>
+  <div class="stat-line"><b id="h-active">-</b> active · <span id="h-silent">-</span> silent</div>
+  <div class="stat-line" id="h-poll">synchronizing…</div>
+</div>
+
+<div class="hud corner bl legend">
+  <div><span class="dot hot"></span>close orbit - high activation</div>
+  <div><span class="dot cool"></span>drifting - decaying</div>
+  <div><span class="dot mute"></span>silent - forgotten, recoverable</div>
+  <div><span class="dot dead"></span>superseded - corrected history</div>
+</div>
+
+<div class="search-wrap">
+  <input id="search" type="text" placeholder="SEARCH MEMORIES  ( / )" autocomplete="off" spellcheck="false">
+  <span id="search-count"></span>
+  <div id="search-results"></div>
+</div>
+
+<div class="hud corner br cue">
+  <span class="label">LAST RECALL</span>
+  <span class="text" id="h-cue">-</span>
+</div>
+
+<div class="frame h top"></div>
+<div class="frame h bottom"></div>
+
+<div id="tip"></div>
+
+<div id="dossier">
+  <div class="close-x" onclick="closeDossier()">✕</div>
+  <div class="d-kicker" id="d-kicker">TRACE</div>
+  <h2 id="d-title"></h2>
+  <div class="d-gist" id="d-gist"></div>
+  <table>
+    <tr><td>status</td><td class="d-status" id="d-status"></td></tr>
+    <tr><td>activation</td><td id="d-act"></td></tr>
+    <tr><td>importance β</td><td id="d-beta"></td></tr>
+    <tr><td>access weight</td><td id="d-n"></td></tr>
+    <tr><td>formed</td><td id="d-born"></td></tr>
+    <tr><td>last touched</td><td id="d-touch"></td></tr>
+    <tr><td>origin</td><td id="d-quality"></td></tr>
+    <tr><td>source</td><td id="d-source"></td></tr>
+    <tr><td>pinned</td><td id="d-pinned"></td></tr>
+  </table>
+</div>
+
+<script>
+"use strict";
+const canvas = document.getElementById("cosmos");
+const ctx = canvas.getContext("2d");
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let W = 0, H = 0, DPR = 1, CX = 0, CY = 0, RMAX = 0;
+
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2;
+  RMAX = Math.min(W, H) * 0.46;
+}
+addEventListener("resize", resize);
+resize();
+
+/* deterministic per-id noise so nodes keep their lane between polls */
+function hash01(n, salt) {
+  let x = Math.imul(n ^ salt, 2654435761) >>> 0;
+  x = Math.imul(x ^ (x >>> 13), 3266489917) >>> 0;
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+}
+
+/* ---------- starfield ---------- */
+const stars = [];
+for (let i = 0; i < 140; i++) {
+  stars.push({ a: Math.random() * Math.PI * 2, r: Math.random(), s: 0.4 + Math.random() * 1.1, tw: Math.random() * Math.PI * 2 });
+}
+
+/* ---------- memory nodes ---------- */
+const nodes = new Map();   // id -> node
+const pulses = [];         // expanding reinforcement rings
+const sparks = [];         // signals travelling core->node
+let lastData = null;
+
+const CORE_R = 46;
+
+function targetRadius(trace, rank, total) {
+  if (trace.status === "active") {
+    const p = total > 1 ? rank / (total - 1) : 0;   // 0 = hottest
+    return CORE_R + 38 + Math.pow(p, 0.72) * (RMAX - CORE_R - 60);
+  }
+  const band = trace.status === "superseded" ? 1.0 : 0.92;
+  return RMAX * band + hash01(trace.id, 77) * 26;
+}
+
+function nodeColor(n) {
+  if (n.status === "silent") return [58, 74, 92];
+  if (n.status === "superseded") return [107, 81, 51];
+  const heat = Math.min(1, Math.max(0, (n.activation + 2) / 5));
+  return [46 + 24 * heat, 139 + 85 * heat, 144 + 86 * heat];
+}
+
+function ingest(data) {
+  const active = data.traces.filter(t => t.status === "active")
+    .sort((a, b) => b.activation - a.activation);
+  const rank = new Map(active.map((t, i) => [t.id, i]));
+  const seen = new Set();
+
+  for (const t of data.traces) {
+    seen.add(t.id);
+    const r = targetRadius(t, rank.get(t.id) ?? 0, active.length);
+    let n = nodes.get(t.id);
+    if (!n) {
+      n = {
+        id: t.id, angle: hash01(t.id, 13) * Math.PI * 2,
+        r: CORE_R * 0.4,           // born from the core, drifts outward
+        wobble: hash01(t.id, 29) * Math.PI * 2,
+        speed: (0.02 + hash01(t.id, 41) * 0.05) * (hash01(t.id, 53) > 0.5 ? 1 : -1),
+      };
+      nodes.set(t.id, n);
+    } else if (t.n_access > (n.n_access ?? t.n_access)) {
+      pulses.push({ id: t.id, t: 0 });            // reinforced -> flare
+    }
+    Object.assign(n, t, { tr: r });
+  }
+  for (const id of [...nodes.keys()]) if (!seen.has(id)) nodes.delete(id);
+
+  document.getElementById("h-count").textContent = data.traces.length;
+  document.getElementById("h-active").textContent = active.length;
+  document.getElementById("h-silent").textContent =
+    data.traces.filter(t => t.status !== "active").length;
+  if (data.last_cue) {
+    document.getElementById("h-cue").textContent =
+      "“" + data.last_cue.slice(0, 90) + "”" + (data.last_ms ? "  ·  " + data.last_ms + "ms" : "");
+  }
+  lastData = data;
+  if (typeof searchQ !== "undefined" && searchQ) runSearch();  // keep filter live across polls
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/engram/memories");
+    ingest(await r.json());
+    document.getElementById("h-poll").textContent = "link stable · 4s cycle";
+  } catch {
+    document.getElementById("h-poll").textContent = "⚠ daemon unreachable";
+  }
+  setTimeout(poll, 4000);
+}
+poll();
+
+/* ---------- glow sprite (pre-rendered for perf) ---------- */
+function makeGlow(rgb) {
+  const s = document.createElement("canvas");
+  s.width = s.height = 64;
+  const g = s.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.85)`);
+  grad.addColorStop(0.35, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.25)`);
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return s;
+}
+const glowTeal = makeGlow([70, 224, 230]);
+const glowEmber = makeGlow([224, 145, 63]);
+
+/* ---------- render loop ---------- */
+let T = 0;
+function frame() {
+  T += REDUCED ? 0 : 1 / 60;
+  ctx.clearRect(0, 0, W, H);
+
+  /* deep-space ground */
+  const bg = ctx.createRadialGradient(CX, CY, 0, CX, CY, Math.max(W, H) * 0.72);
+  bg.addColorStop(0, "#0A1220");
+  bg.addColorStop(0.55, "#060B14");
+  bg.addColorStop(1, "#04060C");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  /* stars */
+  for (const s of stars) {
+    const r = s.r * Math.max(W, H) * 0.7;
+    const x = CX + Math.cos(s.a) * r, y = CY + Math.sin(s.a) * r * 0.86;
+    const tw = 0.35 + 0.3 * Math.sin(T * s.s + s.tw);
+    ctx.fillStyle = `rgba(120,160,180,${tw * 0.35})`;
+    ctx.fillRect(x, y, 1.1, 1.1);
+  }
+
+  /* faint orbital rings */
+  ctx.strokeStyle = "rgba(70,224,230,0.045)";
+  ctx.lineWidth = 1;
+  for (const f of [0.33, 0.62, 0.9]) {
+    ctx.beginPath();
+    ctx.arc(CX, CY, CORE_R + (RMAX - CORE_R) * f, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  /* ---- the core: a coalescing neural nucleus ---- */
+  ctx.drawImage(glowTeal, CX - 90, CY - 90, 180, 180);
+  for (let ring = 0; ring < 3; ring++) {
+    const rr = CORE_R - ring * 11;
+    const rot = T * (0.14 + ring * 0.09) * (ring % 2 ? -1 : 1);
+    ctx.strokeStyle = `rgba(70,224,230,${0.5 - ring * 0.13})`;
+    ctx.lineWidth = 1.4 - ring * 0.3;
+    for (let seg = 0; seg < 3; seg++) {
+      const a0 = rot + seg * (Math.PI * 2 / 3);
+      ctx.beginPath();
+      ctx.arc(CX, CY, rr, a0, a0 + Math.PI * 2 / 3 - 0.42);
+      ctx.stroke();
+    }
+  }
+  /* nucleus particles */
+  for (let i = 0; i < 22; i++) {
+    const pa = hash01(i, 7) * Math.PI * 2 + T * (0.3 + hash01(i, 9) * 0.4);
+    const pr = 6 + hash01(i, 11) * (CORE_R - 22) * (0.55 + 0.4 * Math.sin(T * 0.7 + i));
+    ctx.fillStyle = `rgba(140,240,244,${0.25 + 0.3 * hash01(i, 17)})`;
+    ctx.beginPath();
+    ctx.arc(CX + Math.cos(pa) * pr, CY + Math.sin(pa) * pr * 0.92, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /* ---- nodes ---- */
+  const hot = [];
+  for (const n of nodes.values()) {
+    /* ease toward target radius; slow orbit, closer = faster */
+    n.r += ((n.tr ?? n.r) - n.r) * 0.03;
+    const speedScale = REDUCED ? 0 : (CORE_R + 120) / (n.r + 60);
+    n.angle += n.speed * speedScale * (1 / 60);
+    const breathe = REDUCED ? 0 : Math.sin(T * 0.6 + n.wobble) * 4;
+    n.x = CX + Math.cos(n.angle) * (n.r + breathe);
+    n.y = CY + Math.sin(n.angle) * (n.r + breathe) * 0.94;
+
+    if (n.status === "active" && n.r < CORE_R + (RMAX - CORE_R) * 0.4) hot.push(n);
+  }
+  hot.sort((a, b) => b.activation - a.activation);
+
+  /* synapse filaments to the hottest traces */
+  for (const n of hot.slice(0, 8)) {
+    const grad = ctx.createLinearGradient(CX, CY, n.x, n.y);
+    grad.addColorStop(0, "rgba(70,224,230,0.22)");
+    grad.addColorStop(1, "rgba(70,224,230,0.03)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    const mx = (CX + n.x) / 2 + Math.sin(T * 0.4 + n.id) * 14;
+    const my = (CY + n.y) / 2 + Math.cos(T * 0.5 + n.id) * 14;
+    ctx.moveTo(CX, CY);
+    ctx.quadraticCurveTo(mx, my, n.x, n.y);
+    ctx.stroke();
+    if (!REDUCED && Math.random() < 0.012) sparks.push({ n, t: 0 });
+  }
+
+  /* sparks: signals travelling outward along filaments */
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    s.t += 0.025;
+    if (s.t >= 1 || !nodes.has(s.n.id)) { sparks.splice(i, 1); continue; }
+    const x = CX + (s.n.x - CX) * s.t, y = CY + (s.n.y - CY) * s.t;
+    ctx.drawImage(glowTeal, x - 7, y - 7, 14, 14);
+  }
+
+  /* node bodies (search dims non-matches, rings matches) */
+  for (const n of nodes.values()) {
+    const [r, g, b] = nodeColor(n);
+    const size = Math.min(2.2 + (n.n_access - 1) * 0.9 + (n.beta || 0) * 0.8, 6.5);
+    const dimmed = searchQ && !n._match;
+    ctx.globalAlpha = dimmed ? 0.13 : 1;
+    if (n.status === "active" && !dimmed) {
+      const gs = size * 7;
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(glowTeal, n.x - gs / 2, n.y - gs / 2, gs, gs);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, size, 0, Math.PI * 2);
+    ctx.fill();
+    if (searchQ && n._match) {
+      ctx.strokeStyle = "rgba(70,224,230,0.8)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, size + 4 + Math.sin(T * 2.4) * 1.4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (n.pinned && !dimmed) {
+      ctx.strokeStyle = "rgba(224,145,63,0.85)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, size + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* reinforcement pulses */
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    const p = pulses[i];
+    p.t += 0.02;
+    const n = nodes.get(p.id);
+    if (p.t >= 1 || !n) { pulses.splice(i, 1); continue; }
+    ctx.strokeStyle = `rgba(224,145,63,${0.7 * (1 - p.t)})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, 6 + p.t * 34, 0, Math.PI * 2);
+    ctx.stroke();
+    const gs = 26 * (1 - p.t);
+    ctx.drawImage(glowEmber, n.x - gs / 2, n.y - gs / 2, gs, gs);
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- interaction ---------- */
+const tip = document.getElementById("tip");
+let hovered = null;
+
+function nearest(x, y) {
+  let best = null, bd = 18 * 18;
+  for (const n of nodes.values()) {
+    const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+
+addEventListener("mousemove", (e) => {
+  hovered = nearest(e.clientX, e.clientY);
+  if (hovered) {
+    tip.innerHTML = `<div class="t-id">#${hovered.id} · ${hovered.status.toUpperCase()} · A=${hovered.activation}</div>${hovered.title}`;
+    tip.style.left = Math.min(e.clientX + 16, W - 340) + "px";
+    tip.style.top = (e.clientY + 14) + "px";
+    tip.style.opacity = 1;
+    document.body.style.cursor = "pointer";
+  } else {
+    tip.style.opacity = 0;
+    document.body.style.cursor = "crosshair";
+  }
+});
+
+const fmt = (ts) => new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+addEventListener("click", (e) => {
+  if (e.target.closest("#dossier")) return;
+  const n = nearest(e.clientX, e.clientY);
+  if (!n) { closeDossier(); return; }
+  document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
+  document.getElementById("d-title").textContent = n.title;
+  document.getElementById("d-gist").textContent = n.gist;
+  document.getElementById("d-status").textContent = n.status;
+  document.getElementById("d-act").textContent = n.activation;
+  document.getElementById("d-beta").textContent = n.beta;
+  document.getElementById("d-n").textContent = n.n_access;
+  document.getElementById("d-born").textContent = fmt(n.created_ts);
+  document.getElementById("d-touch").textContent = fmt(n.last_ts);
+  document.getElementById("d-quality").textContent = n.quality;
+  document.getElementById("d-source").textContent = n.source || "user";
+  document.getElementById("d-pinned").textContent = n.pinned ? "yes" : "no";
+  document.getElementById("dossier").classList.add("open");
+});
+
+function closeDossier() {
+  document.getElementById("dossier").classList.remove("open");
+}
+
+/* ---------- search ---------- */
+const searchInput = document.getElementById("search");
+const searchResults = document.getElementById("search-results");
+const searchCount = document.getElementById("search-count");
+let searchQ = "";
+
+function runSearch() {
+  searchQ = searchInput.value.trim().toLowerCase();
+  const terms = searchQ.split(/\s+/).filter(Boolean);
+  let matches = [];
+  for (const n of nodes.values()) {
+    const hay = `${n.title} ${n.gist} ${n.source || ""} #${n.id}`.toLowerCase();
+    n._match = terms.length > 0 && terms.every((t) => hay.includes(t));
+    if (n._match) matches.push(n);
+  }
+  if (!terms.length) {
+    searchCount.textContent = "";
+    searchResults.classList.remove("open");
+    return;
+  }
+  matches.sort((a, b) => b.activation - a.activation);
+  searchCount.textContent = `${matches.length} HIT${matches.length === 1 ? "" : "S"}`;
+  searchResults.innerHTML = matches.slice(0, 10).map((n) =>
+    `<div class="sr-item" data-id="${n.id}"><span class="sr-id">#${n.id}</span>` +
+    `${n.title.replace(/</g, "&lt;").slice(0, 60)}` +
+    `<span class="sr-status">${n.status.toUpperCase()}</span></div>`
+  ).join("");
+  searchResults.classList.toggle("open", matches.length > 0);
+}
+searchInput.addEventListener("input", runSearch);
+searchResults.addEventListener("click", (e) => {
+  const item = e.target.closest(".sr-item");
+  if (!item) return;
+  const n = nodes.get(Number(item.dataset.id));
+  if (n) {
+    pulses.push({ id: n.id, t: 0 });
+    document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
+    document.getElementById("d-title").textContent = n.title;
+    document.getElementById("d-gist").textContent = n.gist;
+    document.getElementById("d-status").textContent = n.status;
+    document.getElementById("d-act").textContent = n.activation;
+    document.getElementById("d-beta").textContent = n.beta;
+    document.getElementById("d-n").textContent = n.n_access;
+    document.getElementById("d-born").textContent = fmt(n.created_ts);
+    document.getElementById("d-touch").textContent = fmt(n.last_ts);
+    document.getElementById("d-quality").textContent = n.quality;
+    document.getElementById("d-source").textContent = n.source || "user";
+    document.getElementById("d-pinned").textContent = n.pinned ? "yes" : "no";
+    document.getElementById("dossier").classList.add("open");
+  }
+});
+
+addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== searchInput) {
+    e.preventDefault();
+    searchInput.focus();
+  } else if (e.key === "Escape") {
+    if (searchInput.value) {
+      searchInput.value = "";
+      runSearch();
+      searchInput.blur();
+    } else {
+      closeDossier();
+    }
+  }
+});
+</script>
+</body>
+</html>

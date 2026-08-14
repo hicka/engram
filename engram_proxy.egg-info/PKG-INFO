@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: engram-proxy
+Version: 0.3.0
+Summary: Transparent memory sidecar for local and cloud LLMs
+Requires-Python: >=3.11
+Requires-Dist: aiohttp>=3.14
+Requires-Dist: numpy>=2.0
