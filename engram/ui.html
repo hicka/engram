@@ -575,13 +575,17 @@ function nearest(x, y) {
   return best;
 }
 
+function showTip(n, x, y) {
+  tip.innerHTML = `<div class="t-id">#${n.id} \u00B7 ${n.status.toUpperCase()} \u00B7 A=${n.activation}</div>${n.title}`;
+  tip.style.left = Math.min(x + 16, W - 340) + "px";
+  tip.style.top = (y + 14) + "px";
+  tip.style.opacity = 1;
+}
+
 addEventListener("mousemove", (e) => {
   hovered = nearest(e.clientX, e.clientY);
   if (hovered) {
-    tip.innerHTML = `<div class="t-id">#${hovered.id} · ${hovered.status.toUpperCase()} · A=${hovered.activation}</div>${hovered.title}`;
-    tip.style.left = Math.min(e.clientX + 16, W - 340) + "px";
-    tip.style.top = (e.clientY + 14) + "px";
-    tip.style.opacity = 1;
+    showTip(hovered, e.clientX, e.clientY);
     document.body.style.cursor = "pointer";
   } else {
     tip.style.opacity = 0;
@@ -651,6 +655,16 @@ function closeRecall() {
 }
 
 if (location.hash === "#recall") setTimeout(openRecall, 600);
+const traceLink = location.hash.match(/^#trace=(\d+)$/);
+if (traceLink) setTimeout(() => {
+  const n = nodes.get(Number(traceLink[1]));
+  if (n) fillDossier(n);
+}, 1200);
+const tipLink = location.hash.match(/^#tip=(\d+)$/);
+if (tipLink) setTimeout(() => {
+  const n = nodes.get(Number(tipLink[1]));
+  if (n) { hovered = n; showTip(n, n.x, n.y); }
+}, 1500);
 document.getElementById("cue-corner").addEventListener("click", (e) => {
   e.stopPropagation();
   openRecall();

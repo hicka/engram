@@ -7,6 +7,11 @@ Give your model a memory, local or cloud. One process, one SQLite file, zero cod
 ![The Engram memory observatory: memories orbiting a neural core at radii set by their live activation](https://hicka.github.io/engram/observatory.png?v=2)
 *The built-in observatory at `/engram/ui`: memories orbit by activation, reinforced ones fall inward, decaying ones drift out.*
 
+| ![A selected memory with its hebbian web lit and the full dossier panel](https://hicka.github.io/engram/shot-linked.png?v=1) | ![Hovering a mote shows its id, status, live activation, and title](https://hicka.github.io/engram/shot-hover.png?v=1) |
+|---|---|
+
+*Click a memory and its hebbian web stays lit, dossier alongside; hover any mote for its status, activation, and title.*
+
 Engram is a transparent proxy that sits between any client and Ollama. It recalls
 relevant memories from past sessions and injects them before the model answers
 (~22 ms overhead, no LLM on the request path), then summarizes each exchange in
