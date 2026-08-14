@@ -76,6 +76,14 @@ Failures fail open: a slow or broken pipeline degrades to a plain proxy.
 
 Full architecture spec: see the published design document.
 
+## For coding agents
+
+The repo ships an agent-consumable skill at `skills/engram-integration/SKILL.md`
+(standard SKILL.md format: Claude Code, OpenClaw, and Hermes all read it).
+Point your agent at it, or just say "integrate engram into my setup", and it
+walks the full recipe: preflight, install, per-client wiring, verification,
+and the gotchas that cost us real debugging time.
+
 ## Cloud models
 
 Engram can give a cloud model the same memory, with background work staying
