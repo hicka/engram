@@ -216,7 +216,7 @@
   <div><span class="dot cool"></span>drifting - decaying</div>
   <div><span class="dot mute"></span>silent - forgotten, recoverable</div>
   <div><span class="dot dead"></span>superseded - corrected history</div>
-  <div><span style="display:inline-block;width:14px;height:1px;background:var(--synapse-dim);margin-right:6px;vertical-align:4px"></span>linked - recalled together; hover a mote to trace its web</div>
+  <div><span style="display:inline-block;width:14px;height:1px;background:var(--synapse-dim);margin-right:6px;vertical-align:4px"></span>linked - recalled together; hover or select a mote to trace its web</div>
 </div>
 
 <div class="search-wrap">
@@ -462,7 +462,8 @@ function frame() {
   for (const [a, b, w] of links) {
     const na = nodes.get(a), nb = nodes.get(b);
     if (!na || !nb) continue;
-    const touched = hovered && (hovered.id === a || hovered.id === b);
+    const touched = (hovered && (hovered.id === a || hovered.id === b))
+      || (selectedId !== null && (selectedId === a || selectedId === b));
     if (searchQ && !(na._match && nb._match) && !touched) continue;
     ctx.strokeStyle = touched
       ? `rgba(224,145,63,${0.25 + w * 0.55})`
@@ -524,6 +525,13 @@ function frame() {
       ctx.arc(n.x, n.y, size + 4 + Math.sin(T * 2.4) * 1.4, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (n.id === selectedId) {
+      ctx.strokeStyle = "rgba(70,224,230,0.9)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, size + 5.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (n.pinned && !dimmed) {
       ctx.strokeStyle = "rgba(224,145,63,0.85)";
       ctx.lineWidth = 1.1;
@@ -556,6 +564,7 @@ requestAnimationFrame(frame);
 /* ---------- interaction ---------- */
 const tip = document.getElementById("tip");
 let hovered = null;
+let selectedId = null;
 
 function nearest(x, y) {
   let best = null, bd = 18 * 18;
@@ -587,27 +596,17 @@ addEventListener("click", (e) => {
   if (e.target.closest("#recall-panel") || e.target.closest("#cue-corner")) return;
   const n = nearest(e.clientX, e.clientY);
   if (!n) { closeDossier(); closeRecall(); return; }
-  document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
-  document.getElementById("d-title").textContent = n.title;
-  document.getElementById("d-gist").textContent = n.gist;
-  document.getElementById("d-status").textContent = n.status;
-  document.getElementById("d-act").textContent = n.activation;
-  document.getElementById("d-beta").textContent = n.beta;
-  document.getElementById("d-n").textContent = n.n_access;
-  document.getElementById("d-born").textContent = fmt(n.created_ts);
-  document.getElementById("d-touch").textContent = fmt(n.last_ts);
-  document.getElementById("d-quality").textContent = n.quality;
-  document.getElementById("d-source").textContent = n.source || "user";
-  document.getElementById("d-pinned").textContent = n.pinned ? "yes" : "no";
-  document.getElementById("dossier").classList.add("open");
+  fillDossier(n);
 });
 
 function closeDossier() {
+  selectedId = null;
   document.getElementById("dossier").classList.remove("open");
 }
 
 /* ---------- last-recall inspection ---------- */
 function fillDossier(n) {
+  selectedId = n.id;
   document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
   document.getElementById("d-title").textContent = n.title;
   document.getElementById("d-gist").textContent = n.gist;
@@ -700,19 +699,7 @@ searchResults.addEventListener("click", (e) => {
   const n = nodes.get(Number(item.dataset.id));
   if (n) {
     pulses.push({ id: n.id, t: 0 });
-    document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
-    document.getElementById("d-title").textContent = n.title;
-    document.getElementById("d-gist").textContent = n.gist;
-    document.getElementById("d-status").textContent = n.status;
-    document.getElementById("d-act").textContent = n.activation;
-    document.getElementById("d-beta").textContent = n.beta;
-    document.getElementById("d-n").textContent = n.n_access;
-    document.getElementById("d-born").textContent = fmt(n.created_ts);
-    document.getElementById("d-touch").textContent = fmt(n.last_ts);
-    document.getElementById("d-quality").textContent = n.quality;
-    document.getElementById("d-source").textContent = n.source || "user";
-    document.getElementById("d-pinned").textContent = n.pinned ? "yes" : "no";
-    document.getElementById("dossier").classList.add("open");
+    fillDossier(n);
   }
 });
 
