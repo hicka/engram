@@ -178,6 +178,7 @@
   <div><span class="dot cool"></span>drifting - decaying</div>
   <div><span class="dot mute"></span>silent - forgotten, recoverable</div>
   <div><span class="dot dead"></span>superseded - corrected history</div>
+  <div><span style="display:inline-block;width:14px;height:1px;background:var(--synapse-dim);margin-right:6px;vertical-align:4px"></span>linked - recalled together; hover a mote to trace its web</div>
 </div>
 
 <div class="search-wrap">
@@ -250,6 +251,7 @@ for (let i = 0; i < 140; i++) {
 const nodes = new Map();   // id -> node
 const pulses = [];         // expanding reinforcement rings
 const sparks = [];         // signals travelling core->node
+let links = [];            // hebbian graph edges [a, b, weight]
 let lastData = null;
 
 const CORE_R = 46;
@@ -294,6 +296,7 @@ function ingest(data) {
     Object.assign(n, t, { tr: r });
   }
   for (const id of [...nodes.keys()]) if (!seen.has(id)) nodes.delete(id);
+  links = data.links || [];
 
   document.getElementById("h-count").textContent = data.traces.length;
   document.getElementById("h-active").textContent = active.length;
@@ -405,6 +408,24 @@ function frame() {
     if (n.status === "active" && n.r < CORE_R + (RMAX - CORE_R) * 0.4) hot.push(n);
   }
   hot.sort((a, b) => b.activation - a.activation);
+
+  /* hebbian graph edges: memories that fire together, wired together */
+  for (const [a, b, w] of links) {
+    const na = nodes.get(a), nb = nodes.get(b);
+    if (!na || !nb) continue;
+    const touched = hovered && (hovered.id === a || hovered.id === b);
+    if (searchQ && !(na._match && nb._match) && !touched) continue;
+    ctx.strokeStyle = touched
+      ? `rgba(224,145,63,${0.25 + w * 0.55})`
+      : `rgba(70,224,230,${0.05 + w * 0.22})`;
+    ctx.lineWidth = 0.5 + w * 1.1;
+    const mx = (na.x + nb.x) / 2 + Math.sin(T * 0.3 + a + b) * 6;
+    const my = (na.y + nb.y) / 2 + Math.cos(T * 0.35 + a) * 6;
+    ctx.beginPath();
+    ctx.moveTo(na.x, na.y);
+    ctx.quadraticCurveTo(mx, my, nb.x, nb.y);
+    ctx.stroke();
+  }
 
   /* synapse filaments to the hottest traces */
   for (const n of hot.slice(0, 8)) {

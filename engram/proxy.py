@@ -631,9 +631,22 @@ async def handle_memories(request):
             "last_ts": last8[-1][0] if last8 else r["created_ts"],
             "activation": round(act + (r["beta"] or 0.0), 3),
         })
+    # graph edges among the returned traces, for the observatory
+    ids = [t["id"] for t in traces]
+    links = []
+    if ids:
+        q = ",".join("?" * len(ids))
+        links = [
+            [r["a"], r["b"], round(r["weight"], 3)]
+            for r in store.db.execute(
+                f"SELECT a, b, weight FROM links WHERE a IN ({q}) AND b IN ({q})"
+                " AND weight >= 0.12 ORDER BY weight DESC LIMIT 400",
+                ids + ids,
+            ).fetchall()
+        ]
     last = store.get_meta("last_recall") or {}
     return web.json_response({
-        "now": now, "traces": traces,
+        "now": now, "traces": traces, "links": links,
         "last_cue": last.get("cue", ""), "last_ms": last.get("ms"),
     })
 
