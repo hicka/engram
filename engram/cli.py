@@ -100,7 +100,34 @@ def cmd_bench(cfg: Config, args):
     from .store import Store
 
     async def go():
-        store = Store(cfg.db_path, cfg.embed_dim)
+        if getattr(args, "synthetic", 0):
+            # Reproducible scale benchmark: a throwaway store with N synthetic
+            # traces (random unit embeddings, generated text for FTS), so the
+            # latency claims can be verified on any machine at any store size.
+            import random
+            import tempfile
+            from pathlib import Path
+
+            import numpy as np
+
+            n = args.synthetic
+            tmp = tempfile.mkdtemp(prefix="engram-bench-")
+            cfg.db_path = Path(tmp) / "bench.db"
+            store = Store(cfg.db_path, cfg.embed_dim)
+            random.seed(11)
+            rng = np.random.default_rng(11)
+            words = ("deploy server database timeout password project deadline "
+                     "meeting budget kitchen coffee release branch commit review "
+                     "invoice ticket flight hotel training model memory recall").split()
+            for i in range(n):
+                v = rng.standard_normal(cfg.embed_dim).astype(np.float32)
+                v /= np.linalg.norm(v)
+                text = " ".join(random.choices(words, k=12))
+                store.add_trace(None, f"synthetic trace {i} {text[:24]}", text,
+                                f"s{i % 97}", v, "llm", fts_extra=text)
+            print(f"seeded {n} synthetic traces in {tmp}")
+        else:
+            store = Store(cfg.db_path, cfg.embed_dim)
         async with aiohttp.ClientSession() as http:
             r = Recall(store, cfg, http)
             r.cfg.embed_timeout_s = 5.0
@@ -234,6 +261,8 @@ def main():
     sub.add_parser("stats", help="store stats")
     sp = sub.add_parser("bench", help="measure recall latency")
     sp.add_argument("-n", type=int, default=20)
+    sp.add_argument("--synthetic", type=int, default=0, metavar="N",
+                    help="benchmark against a throwaway store seeded with N synthetic traces")
     sp = sub.add_parser("eval", help="run the scripted memory regression scenario")
     sp.add_argument("--model", default=None, help="answering model to wrap (default qwen3:0.6b)")
     sub.add_parser("mcp", help="run the memory-verbs MCP server on stdio")

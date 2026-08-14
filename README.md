@@ -60,6 +60,8 @@ engram stats            store counts, queue depth, degraded recalls
 engram bench            measure embed + recall latency on your machine
 ```
 
+Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
+
 ## Design in one paragraph
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
