@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 engram/__init__.py
@@ -8,10 +9,12 @@ engram/config.py
 engram/eval.py
 engram/formation.py
 engram/mcp.py
+engram/profile.py
 engram/proxy.py
 engram/recall.py
 engram/store.py
 engram/summarizer.py
+engram/ui.html
 engram_proxy.egg-info/PKG-INFO
 engram_proxy.egg-info/SOURCES.txt
 engram_proxy.egg-info/dependency_links.txt

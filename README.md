@@ -20,7 +20,7 @@ the background - using the same small model you're chatting with.
 ## Install
 
 ```bash
-pip install git+https://github.com/hicka/engram.git    # or: uvx --from git+https://github.com/hicka/engram engram up
+pip install engram-proxy    # or: uvx --from engram-proxy engram up
 ollama pull qwen3:1.7b qwen3-embedding:0.6b
 ```
 
