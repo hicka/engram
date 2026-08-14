@@ -280,31 +280,22 @@ class Store:
         )
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (old_id,))
         self.db.commit()
-        if old_id in self._ids:
-            i = self._ids.index(old_id)
-            self._ids.pop(i)
-            self._mat = np.delete(self._mat, i, axis=0)
+        self._rebuild_index()
 
     def silence(self, trace_id: int):
-        """Forgetting is retrieval failure, not deletion: kept on disk,
-        excluded from recall and both indexes."""
+        """Forgetting is retrieval failure, not deletion: kept on disk, out of
+        the recall indexes, into the silent shadow index (resurrectable)."""
         self.db.execute("UPDATE traces SET status='silent' WHERE id=?", (trace_id,))
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (trace_id,))
         self.db.commit()
-        if trace_id in self._ids:
-            i = self._ids.index(trace_id)
-            self._ids.pop(i)
-            self._mat = np.delete(self._mat, i, axis=0)
+        self._rebuild_index()
 
     def delete_trace(self, trace_id: int):
         """Hard deletion - privacy path only."""
         self.db.execute("DELETE FROM traces WHERE id=?", (trace_id,))
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (trace_id,))
         self.db.commit()
-        if trace_id in self._ids:
-            i = self._ids.index(trace_id)
-            self._ids.pop(i)
-            self._mat = np.delete(self._mat, i, axis=0)
+        self._rebuild_index()
 
     def edit_trace(self, trace_id: int, title: str, gist: str, embedding=None):
         blob = embedding.astype(np.float32).tobytes() if embedding is not None else None
