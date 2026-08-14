@@ -59,7 +59,9 @@
   .dot.mute { background: var(--slate); }
   .dot.dead { background: #6B5133; }
 
-  .cue { font-size: 10.5px; line-height: 1.6; }
+  .cue { font-size: 10.5px; line-height: 1.6; pointer-events: auto; cursor: pointer; }
+  .cue:hover .label { color: var(--synapse); }
+  .cue .hint { color: var(--faint); font-size: 9px; letter-spacing: 0.14em; }
   .cue .label { color: var(--synapse-dim); letter-spacing: 0.22em; }
   .cue .text { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 42vw; }
 
@@ -105,6 +107,42 @@
   .sr-item:hover { background: rgba(70, 224, 230, 0.07); }
   .sr-item .sr-id { color: var(--faint); font-size: 10px; margin-right: 8px; }
   .sr-item .sr-status { float: right; color: var(--synapse-dim); font-size: 9.5px; letter-spacing: 0.08em; }
+
+  /* ---------- last-recall panel ---------- */
+  #recall-panel {
+    position: fixed; z-index: 29; top: 0; right: 0; bottom: 0; width: min(460px, 94vw);
+    background: linear-gradient(270deg, rgba(7, 12, 20, 0.97), rgba(7, 12, 20, 0.9));
+    border-left: 1px solid var(--hud-line);
+    padding: 84px 26px 28px;
+    transform: translateX(102%);
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+    backdrop-filter: blur(10px);
+    overflow-y: auto;
+  }
+  #recall-panel.open { transform: none; }
+  #recall-panel .d-kicker { font-size: 10px; letter-spacing: 0.3em; color: var(--synapse-dim); text-transform: uppercase; }
+  #recall-panel h2 {
+    font-family: "Futura", "Avenir Next", sans-serif;
+    font-size: 16px; font-weight: 500; color: var(--text);
+    margin: 10px 0 6px; line-height: 1.4; letter-spacing: 0.01em;
+  }
+  #recall-panel pre {
+    background: rgba(224, 145, 63, 0.06); border-left: 2px solid var(--ember);
+    border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 6px 0 4px;
+    font-family: ui-monospace, "SF Mono", "Menlo", monospace; font-size: 11px;
+    line-height: 1.6; white-space: pre-wrap; overflow-x: auto; color: var(--text);
+  }
+  .rc-item {
+    padding: 7px 10px; font-size: 11px; cursor: pointer;
+    border-bottom: 1px solid rgba(94, 114, 128, 0.12); color: var(--faint);
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .rc-item:hover { background: rgba(70, 224, 230, 0.06); }
+  .rc-item .m { min-width: 14px; }
+  .rc-item.admitted { color: var(--text); }
+  .rc-item.admitted .m { color: var(--synapse); }
+  .rc-item .sc { font-size: 9.5px; color: var(--synapse-dim); white-space: nowrap; }
+  .rc-item .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ---------- tooltip ---------- */
   #tip {
@@ -187,8 +225,8 @@
   <div id="search-results"></div>
 </div>
 
-<div class="hud corner br cue">
-  <span class="label">LAST RECALL</span>
+<div class="hud corner br cue" id="cue-corner" title="click to inspect the full recall">
+  <span class="label">LAST RECALL</span> <span class="hint">CLICK TO INSPECT</span>
   <span class="text" id="h-cue">-</span>
 </div>
 
@@ -196,6 +234,17 @@
 <div class="frame h bottom"></div>
 
 <div id="tip"></div>
+
+<div id="recall-panel">
+  <div class="close-x" onclick="closeRecall()">✕</div>
+  <div class="d-kicker">LAST RECALL</div>
+  <h2 id="rc-cue"></h2>
+  <div class="tmeta" id="rc-meta" style="margin-bottom:16px"></div>
+  <div class="d-kicker">INJECTED BLOCK</div>
+  <pre id="rc-block"></pre>
+  <div class="d-kicker" style="margin:18px 0 4px">CANDIDATES (SCORED)</div>
+  <div id="rc-cands"></div>
+</div>
 
 <div id="dossier">
   <div class="close-x" onclick="closeDossier()">✕</div>
@@ -535,8 +584,9 @@ const fmt = (ts) => new Date(ts * 1000).toLocaleString([], { month: "short", day
 
 addEventListener("click", (e) => {
   if (e.target.closest("#dossier")) return;
+  if (e.target.closest("#recall-panel") || e.target.closest("#cue-corner")) return;
   const n = nearest(e.clientX, e.clientY);
-  if (!n) { closeDossier(); return; }
+  if (!n) { closeDossier(); closeRecall(); return; }
   document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
   document.getElementById("d-title").textContent = n.title;
   document.getElementById("d-gist").textContent = n.gist;
@@ -555,6 +605,64 @@ addEventListener("click", (e) => {
 function closeDossier() {
   document.getElementById("dossier").classList.remove("open");
 }
+
+/* ---------- last-recall inspection ---------- */
+function fillDossier(n) {
+  document.getElementById("d-kicker").textContent = `TRACE #${n.id}`;
+  document.getElementById("d-title").textContent = n.title;
+  document.getElementById("d-gist").textContent = n.gist;
+  document.getElementById("d-status").textContent = n.status;
+  document.getElementById("d-act").textContent = n.activation;
+  document.getElementById("d-beta").textContent = n.beta;
+  document.getElementById("d-n").textContent = n.n_access;
+  document.getElementById("d-born").textContent = fmt(n.created_ts);
+  document.getElementById("d-touch").textContent = fmt(n.last_ts);
+  document.getElementById("d-quality").textContent = n.quality;
+  document.getElementById("d-source").textContent = n.source || "user";
+  document.getElementById("d-pinned").textContent = n.pinned ? "yes" : "no";
+  document.getElementById("dossier").classList.add("open");
+}
+
+async function openRecall() {
+  let d;
+  try {
+    d = await (await fetch("/engram/why")).json();
+  } catch { return; }
+  if (!d || !d.cue) return;
+  document.getElementById("rc-cue").textContent = "\u201C" + d.cue + "\u201D";
+  const when = d.ts ? new Date(d.ts * 1000).toLocaleTimeString() : "";
+  document.getElementById("rc-meta").textContent =
+    `${when} \u00B7 ${d.ms}ms \u00B7 ${d.semantic ? "semantic + lexical" : "lexical only"}`;
+  document.getElementById("rc-block").textContent = d.block || "(nothing injected)";
+  const cands = d.candidates || [];
+  document.getElementById("rc-cands").innerHTML = cands.length
+    ? cands.map((c) =>
+        `<div class="rc-item ${c.admitted ? "admitted" : ""}" data-id="${c.id}">` +
+        `<span class="m">${c.admitted ? "\u2713" : "\u00B7"}</span>` +
+        `<span class="t">#${c.id} ${String(c.title || "").replace(/</g, "&lt;").slice(0, 48)}</span>` +
+        `<span class="sc">cos ${c.cos} \u00B7 act ${c.activation} \u00B7 ${c.score}</span></div>`
+      ).join("")
+    : '<div class="rc-item">(no candidates - nothing matched this cue)</div>';
+  closeDossier();
+  document.getElementById("recall-panel").classList.add("open");
+}
+
+function closeRecall() {
+  document.getElementById("recall-panel").classList.remove("open");
+}
+
+if (location.hash === "#recall") setTimeout(openRecall, 600);
+document.getElementById("cue-corner").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openRecall();
+});
+document.getElementById("recall-panel").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const item = e.target.closest(".rc-item");
+  if (!item || !item.dataset.id) return;
+  const n = nodes.get(Number(item.dataset.id));
+  if (n) { pulses.push({ id: n.id, t: 0 }); fillDossier(n); }
+});
 
 /* ---------- search ---------- */
 const searchInput = document.getElementById("search");
@@ -617,8 +725,10 @@ addEventListener("keydown", (e) => {
       searchInput.value = "";
       runSearch();
       searchInput.blur();
-    } else {
+    } else if (document.getElementById("dossier").classList.contains("open")) {
       closeDossier();
+    } else {
+      closeRecall();
     }
   }
 });
