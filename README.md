@@ -36,9 +36,9 @@ engram up
 
 # in another terminal - stock ollama, now with memory:
 export OLLAMA_HOST=127.0.0.1:11435
-ollama run qwen3:0.6b "I'm Sam. My cat is Miso and I'm badly allergic to peanuts."
+ollama run qwen3:1.7b "I'm Sam. My cat is Miso and I'm badly allergic to peanuts."
 # ... later, in a NEW session:
-ollama run qwen3:0.6b "Ordering Thai tonight - anything I should avoid?"
+ollama run qwen3:1.7b "Ordering Thai tonight - anything I should avoid?"
 ```
 
 Requires Ollama with `qwen3:1.7b` (summarizer) and `qwen3-embedding:0.6b`
