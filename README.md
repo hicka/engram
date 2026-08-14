@@ -1,6 +1,6 @@
 # Engram
 
-Give your local model a memory. One process, one SQLite file, zero code changes.
+Give your model a memory, local or cloud. One process, one SQLite file, zero code changes.
 
 [![PyPI](https://img.shields.io/pypi/v/engram-proxy)](https://pypi.org/project/engram-proxy/) [![docs](https://img.shields.io/badge/docs-hicka.github.io%2Fengram-46E0E6)](https://hicka.github.io/engram/) ![license](https://img.shields.io/badge/license-MIT-green)
 

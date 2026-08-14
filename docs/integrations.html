@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engram + Hermes Agent / OpenClaw</title>
+<style>
+  :root {
+    --void:#070B12; --panel:#0B121D; --synapse:#46E0E6; --synapse-dim:#1E8B90;
+    --ember:#E0913F; --text:#CDDBE1; --faint:#68798a; --line:rgba(70,224,230,0.15);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--void);color:var(--text);font-family:ui-monospace,"SF Mono","Menlo",monospace;font-size:14px;line-height:1.75}
+  a{color:var(--synapse);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:230px 1fr;max-width:1100px;margin:0 auto;gap:40px;padding:0 24px}
+  @media(max-width:860px){.layout{grid-template-columns:1fr}nav.side{position:static;height:auto;border:none;padding-top:20px}}
+  nav.side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:36px 0;border-right:1px solid rgba(94,114,128,0.12);font-size:12px}
+  nav.side .wm{font-family:"Futura","Avenir Next",sans-serif;letter-spacing:0.3em;color:var(--synapse);font-size:16px;margin-bottom:22px;display:block}
+  nav.side a{display:block;color:var(--faint);padding:4px 0;letter-spacing:0.04em}
+  nav.side a:hover{color:var(--synapse);text-decoration:none}
+  nav.side .g{color:var(--synapse-dim);letter-spacing:0.2em;font-size:10px;text-transform:uppercase;margin:16px 0 4px}
+  main{padding:36px 0 100px;min-width:0}
+  h1{font-family:"Futura","Avenir Next",sans-serif;font-weight:500;font-size:28px;letter-spacing:0.04em;margin-bottom:8px}
+  .vtag{color:var(--faint);font-size:12px;margin-bottom:30px}
+  h2{font-family:"Futura","Avenir Next",sans-serif;font-weight:500;font-size:21px;letter-spacing:0.05em;color:var(--synapse);margin:52px 0 12px;padding-top:14px;border-top:1px solid rgba(94,114,128,0.15)}
+  h3{font-size:14px;color:var(--text);letter-spacing:0.08em;text-transform:uppercase;margin:26px 0 8px}
+  p{margin-bottom:12px;max-width:78ch}
+  p.d{color:var(--faint)}
+  ul,ol{margin:0 0 12px 20px;max-width:75ch}
+  li{margin-bottom:6px;color:var(--faint)}
+  li b, p b{color:var(--text);font-weight:500}
+  code{background:var(--panel);border:1px solid rgba(94,114,128,0.2);border-radius:3px;padding:1px 6px;font-size:12.5px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px 16px;font-size:12.5px;line-height:1.7;overflow-x:auto;margin:12px 0 18px}
+  pre code{background:none;border:none;padding:0}
+  pre .c{color:var(--faint)}
+  .note{border-left:2px solid var(--ember);background:rgba(224,145,63,0.06);padding:10px 16px;margin:14px 0;font-size:13px;color:var(--faint);max-width:78ch}
+  .note b{color:var(--ember)}
+  .ok{border-left:2px solid var(--synapse-dim);background:rgba(70,224,230,0.05);padding:10px 16px;margin:14px 0;font-size:13px;color:var(--faint);max-width:78ch}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+  <a class="wm" href="index.html">ENGRAM</a>
+  <div class="g">This guide</div>
+  <a href="#hermes">Hermes Agent</a>
+  <a href="#hermes-local">· local model</a>
+  <a href="#hermes-cloud">· cloud model</a>
+  <a href="#hermes-mcp">· memory verbs</a>
+  <a href="#hermes-perf">· performance notes</a>
+  <a href="#openclaw">OpenClaw</a>
+  <a href="#coexist">Two memory systems</a>
+  <a href="#verify">Verifying it works</a>
+  <div class="g">Elsewhere</div>
+  <a href="guide.html">Full documentation</a>
+  <a href="https://github.com/hicka/engram">GitHub</a>
+</nav>
+<main>
+<h1>Integrating with Hermes Agent and OpenClaw</h1>
+<div class="vtag">Field-tested recipes. The Hermes path below ran a production iMessage/WhatsApp gateway; the OpenClaw path follows its documented provider contract.</div>
+
+<p>Both integrations share one idea: Engram is a transparent proxy, so the agent never knows it exists. You change one base URL, and every conversation the agent has, on any channel, reads and writes one shared memory store. Prerequisites for everything below:</p>
+<pre><code>pip install engram-proxy
+ollama pull qwen3:1.7b qwen3-embedding:0.6b
+engram up          <span class="c"># proxy on :11435, Ollama on :11434 behind it</span></code></pre>
+
+<h2 id="hermes">Hermes Agent</h2>
+
+<h3 id="hermes-local">Local model as the agent brain</h3>
+<p>Edit <code>~/.hermes/config.yaml</code> and point the model block at Engram instead of Ollama:</p>
+<pre><code>model:
+  default: your-model          <span class="c"># any Ollama model tag</span>
+  provider: ollama
+  base_url: http://localhost:11435/v1     <span class="c"># was 11434</span>
+  ollama_num_ctx: 65536
+  context_length: 65536
+fallback_providers:
+  - provider: ollama
+    model: qwen3:1.7b
+    base_url: http://localhost:11435/v1</code></pre>
+<p>Then restart the gateway (<code>hermes gateway restart</code>) or just start a new <code>hermes chat</code>. That is the whole integration: every turn now gets memory recall before the model answers, and every exchange forms memories afterward.</p>
+<div class="note"><b>Hermes requires a 64k context window</b> and verifies the real allocation, not just your config. Two practical consequences on consumer hardware:
+<ul style="margin-top:8px">
+<li>Ollama's /v1 endpoint ignores per-request <code>num_ctx</code>, so bake it into a model variant: <code>printf 'FROM qwen3:1.7b\nPARAMETER num_ctx 65536\n' &gt; Modelfile &amp;&amp; ollama create my-agent -f Modelfile</code></li>
+<li>A 64k KV cache is ~6GB at f16 for qwen3-class models. Halve it with KV quantization before blaming anything else: <code>launchctl setenv OLLAMA_FLASH_ATTENTION 1</code> and <code>launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0</code>, then restart the Ollama app (measured: 7.5GB resident became 3.9GB with no visible quality change).</li>
+</ul></div>
+
+<h3 id="hermes-cloud">Cloud model as the agent brain, local memory</h3>
+<p>Hermes talks to several clouds over the Anthropic Messages protocol. Engram can sit in that path too, so a frontier model gets your local memory while embeddings and summarization stay on your machine:</p>
+<pre><code><span class="c"># 1. run Engram with a cloud route for Anthropic-protocol traffic</span>
+ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io engram up
+
+<span class="c"># 2. point Hermes's provider base URL at Engram's anthropic path</span>
+<span class="c">#    (env var name depends on the provider; MiniMax shown)</span>
+echo 'MINIMAX_BASE_URL=http://127.0.0.1:11435/anthropic' &gt;&gt; ~/.hermes/.env
+hermes gateway restart</code></pre>
+<p class="d">Auth headers pass through untouched. The whole Messages surface follows the cloud upstream (count_tokens and batches included), so the SDK never goes split-brained. Added cloud cost is the injected block only, and big-prompt injection rides the newest message so the provider's prompt-cache discount survives.</p>
+
+<h3 id="hermes-mcp">Give the agent explicit memory verbs</h3>
+<p>Transparent injection works with any model. On top of that, Hermes agents can call Engram's memory tools directly (search, save, correct, pin, forget, profile), over the same store:</p>
+<pre><code>hermes mcp add engram-memory --command engram --args mcp
+hermes gateway restart</code></pre>
+<p class="d">Use the full path to the <code>engram</code> binary if it is not on the PATH Hermes launches with (<code>which engram</code>). Tool-calling reliability depends on the agent model; small local models see the tools but fumble the calls, while frontier-class models use them cleanly.</p>
+
+<h3 id="hermes-perf">Performance notes from production</h3>
+<ul>
+<li><b>Thinking mode burns turns.</b> qwen3-family models think by default, and the /v1 endpoint cannot disable it per request. For an agent brain, bake suppression into your model variant's template (an empty think block in the generation prefix), or accept hidden reasoning tokens on every internal round.</li>
+<li><b>Prompt caching is everything for big agent prompts.</b> Hermes system prompts run tens of KB. Engram places its memory block to preserve the prefix cache automatically; if turns are still slow every time, something upstream of Engram is churning the prompt head.</li>
+<li><b>Background work yields.</b> Engram's summarizer checks for resident big models and steps aside, so it will not evict your agent's model mid-conversation. If summaries lag during heavy agent use, that is by design; they catch up at idle.</li>
+<li><b>Bootstrap from existing memory.</b> <code>engram import ~/.hermes/memories/MEMORY.md</code> pulls the agent's bounded notes file into the uncapped store, backdated so nothing floods recall.</li>
+</ul>
+
+<h2 id="openclaw">OpenClaw</h2>
+<p>OpenClaw mandates Ollama's native API for local models (its docs warn that /v1 breaks tool calling). Engram speaks that NDJSON protocol byte-faithfully, so the integration is one provider entry, keeping <code>api: "ollama"</code>:</p>
+<pre><code><span class="c">// openclaw.json (or your models config)</span>
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "engram": {
+        "baseUrl": "http://127.0.0.1:11435",
+        "api": "ollama",
+        "apiKey": "ollama-local"
+      }
+    }
+  }
+}</code></pre>
+<ul>
+<li><b>Auto-discovery keeps working.</b> Engram passes <code>/api/tags</code> and <code>/api/show</code> through untouched, so OpenClaw sees the same models with the same capability flags. Its agent bar (tool support plus a 16k+ context) applies to the model, not to Engram.</li>
+<li><b>num_ctx injection passes through.</b> OpenClaw injects <code>options.num_ctx</code> on native-API requests; Engram forwards request bodies unmodified apart from the memory block.</li>
+<li><b>Raw completions are safe.</b> OpenClaw's FIM and template completions hit <code>/api/generate</code>, which Engram never injects into; only chat-shaped turns get memory.</li>
+<li><b>MCP verbs work here too.</b> OpenClaw consumes MCP servers; register <code>engram mcp</code> as a stdio server to give it the explicit memory tools alongside its own.</li>
+</ul>
+
+<h2 id="coexist">Running alongside the agent's own memory</h2>
+<p>Both Hermes (MEMORY.md, USER.md) and OpenClaw (MEMORY.md, daily notes, its memory plugin slot) ship built-in memory. You do not have to choose:</p>
+<ul>
+<li><b>They stack cleanly.</b> The agent's file memory is prompt-level; Engram is API-level, underneath everything. Each catches things the other misses.</li>
+<li><b>Engram filters agent plumbing.</b> Memory-flush prompts, command-approval notices, and similar framework turns that arrive as user-role messages are classified as system provenance and never become memories. Third-party content the agent relays (group chats it observes) forms at reduced weight, cannot supersede your own statements, and can be quarantined entirely with <code>ENGRAM_QUARANTINE=observed</code>.</li>
+<li><b>Watch the caps.</b> Agent memory files are typically bounded (Hermes enforces a character limit). Engram's store is not. When the agent's file fills up, <code>engram import</code> the file and let standing rules live in the agent's config (SOUL.md, AGENTS.md) rather than its memory file.</li>
+</ul>
+
+<h2 id="verify">Verifying it works</h2>
+<pre><code>engram why        <span class="c"># the exact block injected into the last turn, score by score</span>
+engram list       <span class="c"># watch traces form a few seconds after each exchange</span>
+engram stats      <span class="c"># queue depth and degraded-recall counters</span></code></pre>
+<p>Open the observatory at <a href="http://127.0.0.1:11435/engram/ui">127.0.0.1:11435/engram/ui</a> and leave it on a side screen: agent turns flare the memories they touch, and reinforced ones visibly migrate toward the core. The decisive test is always the same: tell the agent a fact on one channel, then ask about it obliquely from another. The answer can only come from Engram.</p>
+
+<p class="d" style="margin-top:50px"><a href="guide.html">Full documentation</a> · <a href="index.html">Home</a> · <a href="https://github.com/hicka/engram">GitHub</a></p>
+</main>
+</div>
+</body>
+</html>
