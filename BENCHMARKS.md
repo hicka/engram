@@ -8,28 +8,74 @@ macOS, Ollama 0.12, embedder `qwen3-embedding:0.6b` truncated to 256d.
 
 `engram bench --synthetic N` seeds a throwaway store with N synthetic traces
 and measures the full recall path (embed, hybrid search, scoring, render)
-with real embedder calls. Run it yourself; seeds are fixed.
+with real embedder calls. `--clustered` draws the vectors around topic
+centers, which is what real embedding stores look like; without it they are
+uniform random, the worst case for any locality structure. Run it yourself;
+seeds are fixed.
 
-| store size | embed p50 / p95 | full recall p50 / p95 |
-|---|---|---|
-| 136 (a real store) | 68.3 / 74.7 ms | 72.7 / 80.1 ms |
-| 1,000 | 67.9 / 72.5 ms | 69.9 / 72.4 ms |
-| 10,000 | 68.4 / 72.0 ms | 71.2 / 75.0 ms |
-| 100,000 | 77.4 / 92.6 ms | 152.8 / **497.5 ms** |
+| store size | embed p50 / p95 | full recall p50 / p95 | v0.4 recall p50 / p95 |
+|---|---|---|---|
+| 136 (a real store) | 68.3 / 74.7 ms | 72.7 / 80.1 ms | same |
+| 1,000 | 66.9 / 73.8 ms | 69.0 / 77.5 ms | 69.9 / 72.4 ms |
+| 10,000 | 70.0 / 73.6 ms | 71.0 / 77.5 ms | 71.2 / 75.0 ms |
+| 100,000 | 68.0 / 73.0 ms | 70.6 / 80.4 ms | 152.8 / **497.5 ms** |
+| 250,000 | 69.1 / 78.7 ms | 75.4 / 85.3 ms | not runnable |
+
+The table uses uniform-random vectors (worst case for the IVF index);
+`--clustered` runs land within noise of the same rows (70.3 / 78.0 ms at
+100k, 73.3 / 80.4 ms at 250k).
 
 Reading:
 
-- Up to ~10k memories the pipeline is embed-bound: search and scoring add
-  single-digit milliseconds. This is the realistic personal-store regime
-  (months of heavy use produced ~140 traces on our production instance;
-  formation gates reject most raw material by design).
-- At 100k the brute-force design shows its ceiling: p95 crosses Engram's
-  300 ms fail-open deadline, which means some recalls degrade to uninjected
-  passthrough. That is the honest current limit. An ANN index and a cheaper
-  lexical-count path activate past ~50k in the roadmap; until then Engram is
-  correctly sized for personal and per-team stores, not corpus-scale RAG.
-- Every failure mode is fail-open: a slow recall forwards the request
+- The pipeline is embed-bound at every measured size: search, scoring, and
+  rendering add ~4 ms at 100k and ~9 ms at 250k. The v0.4 ceiling (p95
+  crossing the 300 ms fail-open deadline at 100k) is gone.
+- Three things removed it, all measured before being built: an index on the
+  recall path's supersession lookup (34 ms per injected gist at 100k, now
+  microseconds), document-frequency pruning of lexical tokens present in
+  more than ~2% of a big store (they carry no discriminative evidence but
+  forced FTS5 to rank 81k postings, ~49 ms), and an IVF dense index past
+  50k traces (below).
+- The same profiling found a correctness bug the latency numbers never
+  showed: lexical match counting used a capped unordered scan that silently
+  undercounted past ~10k rows, disabling lexical admission in big stores.
+  It is now computed exactly at any size (a rowid-constrained FTS query),
+  and a regression test pins it.
+- Every failure mode is still fail-open: a slow recall forwards the request
   untouched rather than delaying it past the deadline.
+
+## The dense index past 50k traces
+
+Below 50k traces (every personal store we have measured; months of heavy
+production use produced ~140) dense search is a single exact matmul - no
+approximation, nothing to tune. Past `ENGRAM_ANN_TRACES` (default 50k) the
+store builds an IVF index: spherical k-means in pure numpy (no new
+dependencies), queries probe the nearest 1/16th of the inverted lists (at
+1/8th the gather cost erased the win over the exact matmul at 100k - the
+probe fraction was tuned by measurement, like everything else here).
+Deletions tombstone, additions land in an always-scanned overflow, and the
+daemon compacts in a background thread only when something changed - and a
+compaction that a write raced is discarded, never installed, so a silenced
+memory can not reappear in the index for even one cycle. The request path
+never waits on an index build.
+
+Measured recall@40 against exact brute force on the same store
+(`engram bench --synthetic 100000 [--clustered]`; exact search with
+top-k selection costs 2.4 ms p50 at 100k for comparison):
+
+| vector distribution | IVF recall@40 | search cost |
+|---|---|---|
+| clustered (realistic for embeddings) | 1.000 | 1.3 ms p50 |
+| uniform random (pathological) | 0.227 | 1.3 ms p50 |
+
+The uniform number is published because it is the honest worst case, and it
+is also moot in practice: uniform random 256-d vectors have a mean best
+cosine of 0.27 against 100k candidates, at Engram's 0.25 admission
+threshold - when vectors carry no cluster structure, almost nothing passes
+admission anyway, approximate or not. Real embedding stores are heavily
+clustered by construction; at 0.88 mean within-cluster cosine the index
+loses nothing. Write-path near-duplicate detection stays exact regardless
+(a missed near-dup would pollute the store).
 
 ## Memory quality: the built-in regression scenario
 
@@ -72,7 +118,8 @@ the request path, runs no network hop (localhost), and bounds every stage
 with a deadline. The write path is also different: competitors spend seconds
 of LLM tool-calling per exchange; Engram summarizes in the background only
 when the GPU is idle, and correctness does not depend on the LLM (extractive
-fallback preserves facts verbatim).
+fallback preserves facts verbatim). Past 50k memories the dense leg switches
+to the IVF index above and the whole path stays under ~86 ms p95 at 250k.
 
 ## Not yet benchmarked
 

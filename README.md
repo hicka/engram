@@ -73,8 +73,9 @@ Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
 worker - running only when the GPU is idle - asks qwen3:1.7b for two plain
 lines (`TITLE:` / `GIST:`; never JSON, with a deterministic extractive fallback)
 and embeds the gist (qwen3-embedding, Matryoshka-truncated to 256d). Recall is
-hybrid BM25 + brute-force dense with **admission on raw thresholds** (unrelated
-turns inject nothing), ranked by relevance + ACT-R activation
+hybrid BM25 + dense with **admission on raw thresholds** (unrelated turns
+inject nothing) - exact search below 50k memories, a pure-numpy IVF index past
+it (~86ms p95 at 250k traces, still embed-bound) - ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
 so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;

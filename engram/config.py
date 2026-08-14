@@ -101,6 +101,15 @@ class Config:
     tier_m_budget: tuple = (4, 4, 1000)   # (max_gists, max_titles, tokens)
     tier_l_budget: tuple = (6, 6, 2000)
 
+    # scale: below ann_traces the dense index is a single exact matmul
+    # (personal stores never leave this regime); past it, an IVF coarse
+    # quantizer bounds each query to a fraction of the store. Lexical
+    # admission starts pruning tokens present in >2% of a big store: no
+    # discriminative power, but they force FTS5 to rank every posting.
+    # Measured at 100k traces; see BENCHMARKS.md.
+    ann_traces: int = int(os.environ.get("ENGRAM_ANN_TRACES", "50000"))
+    lex_prune_traces: int = 20_000
+
     def __post_init__(self):
         self.upstream = self.upstream.rstrip("/")
         self.anthropic_upstream = self.anthropic_upstream.rstrip("/")

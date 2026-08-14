@@ -26,7 +26,7 @@ def cmd_up(cfg: Config, args):
 def cmd_list(cfg: Config, args):
     from .store import Store
 
-    store = Store(cfg.db_path, cfg.embed_dim)
+    store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
     rows = store.db.execute(
         "SELECT * FROM traces WHERE status='active' ORDER BY id DESC LIMIT ?",
         (args.n,),
@@ -47,7 +47,7 @@ def cmd_recall(cfg: Config, args):
     from .store import Store
 
     async def go():
-        store = Store(cfg.db_path, cfg.embed_dim)
+        store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
         async with aiohttp.ClientSession() as http:
             r = Recall(store, cfg, http)
             r.cfg.embed_timeout_s = 5.0  # CLI has no latency budget
@@ -70,7 +70,7 @@ def cmd_recall(cfg: Config, args):
 def cmd_why(cfg: Config, args):
     from .store import Store
 
-    store = Store(cfg.db_path, cfg.embed_dim)
+    store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
     last = store.get_meta("last_recall")
     if not last:
         print("no recall recorded yet")
@@ -90,7 +90,7 @@ def cmd_why(cfg: Config, args):
 def cmd_stats(cfg: Config, args):
     from .store import Store
 
-    print(json.dumps(Store(cfg.db_path, cfg.embed_dim).stats(), indent=2))
+    print(json.dumps(Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces).stats(), indent=2))
 
 
 def cmd_bench(cfg: Config, args):
@@ -102,10 +102,14 @@ def cmd_bench(cfg: Config, args):
     async def go():
         if getattr(args, "synthetic", 0):
             # Reproducible scale benchmark: a throwaway store with N synthetic
-            # traces (random unit embeddings, generated text for FTS), so the
-            # latency claims can be verified on any machine at any store size.
+            # traces (unit embeddings, generated text for FTS), so the latency
+            # claims can be verified on any machine at any store size.
+            # --clustered draws vectors around topic centers instead of
+            # uniformly: real embedding stores are clustered, and uniform
+            # random is the worst case for an IVF index - both get reported.
             import random
             import tempfile
+            import time as _time
             from pathlib import Path
 
             import numpy as np
@@ -113,21 +117,54 @@ def cmd_bench(cfg: Config, args):
             n = args.synthetic
             tmp = tempfile.mkdtemp(prefix="engram-bench-")
             cfg.db_path = Path(tmp) / "bench.db"
-            store = Store(cfg.db_path, cfg.embed_dim)
+            store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
             random.seed(11)
             rng = np.random.default_rng(11)
             words = ("deploy server database timeout password project deadline "
                      "meeting budget kitchen coffee release branch commit review "
                      "invoice ticket flight hotel training model memory recall").split()
+            centers = rng.standard_normal((max(2, n // 500), cfg.embed_dim)).astype(np.float32)
+            centers /= np.linalg.norm(centers, axis=1, keepdims=True)
+            now = _time.time()
+            trace_rows, fts_rows = [], []
             for i in range(n):
                 v = rng.standard_normal(cfg.embed_dim).astype(np.float32)
                 v /= np.linalg.norm(v)
+                if getattr(args, "clustered", False):
+                    v = centers[i % centers.shape[0]] + 0.55 * v
+                    v /= np.linalg.norm(v)
                 text = " ".join(random.choices(words, k=12))
-                store.add_trace(None, f"synthetic trace {i} {text[:24]}", text,
-                                f"s{i % 97}", v, "llm", fts_extra=text)
+                title = f"synthetic trace {i} {text[:24]}"
+                trace_rows.append(("default", None, title, text, "active", "llm",
+                                   now, 1.0, f"[[{now}, 1.0]]", f"s{i % 97}",
+                                   v.tobytes(), 0.0, "user"))
+                fts_rows.append((i + 1, title, text))
+            store.db.executemany(
+                "INSERT INTO traces(ns, episode_id, title, gist, status, quality,"
+                " created_ts, n_access, last8, session_id, embedding, beta, source)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", trace_rows)
+            store.db.executemany(
+                "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)", fts_rows)
+            store.db.commit()
+            t0 = time.perf_counter()
+            store._rebuild_index()  # what the daemon's refresher would do
             print(f"seeded {n} synthetic traces in {tmp}")
+            print(f"index build {time.perf_counter() - t0:.2f}s: {store._active.describe()}")
+            if store._active.describe().startswith("ivf"):
+                hits = total = 0
+                for i in range(30):
+                    q = rng.standard_normal(cfg.embed_dim).astype(np.float32)
+                    q /= np.linalg.norm(q)
+                    if getattr(args, "clustered", False):
+                        q = centers[i % centers.shape[0]] + 0.55 * q
+                        q /= np.linalg.norm(q)
+                    exact = {t for t, _ in store._active.exact_search(q, 40)}
+                    got = {t for t, _ in store._active.search(q, 40)}
+                    hits += len(exact & got)
+                    total += len(exact)
+                print(f"ivf recall@40 vs exact: {hits / max(1, total):.3f}")
         else:
-            store = Store(cfg.db_path, cfg.embed_dim)
+            store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
         async with aiohttp.ClientSession() as http:
             r = Recall(store, cfg, http)
             r.cfg.embed_timeout_s = 5.0
@@ -157,7 +194,7 @@ def cmd_bench(cfg: Config, args):
 def cmd_profile(cfg: Config, args):
     from .store import Store
 
-    row = Store(cfg.db_path, cfg.embed_dim).get_profile()
+    row = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces).get_profile()
     if row is None:
         print("no profile yet - forms automatically during idle consolidation")
         return
@@ -177,7 +214,7 @@ def cmd_lapse(cfg: Config, args):
         print("duration like 30m, 72h, or 45d")
         return
     secs = float(m.group(1)) * {"m": 60, "h": 3600, "d": 86400}[m.group(2)]
-    store = Store(cfg.db_path, cfg.embed_dim)
+    store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
     n = 0
     for r in store.db.execute("SELECT id, last8, created_ts FROM traces").fetchall():
         last8 = [[ts - secs, w] for ts, w in json.loads(r["last8"])]
@@ -263,6 +300,9 @@ def main():
     sp.add_argument("-n", type=int, default=20)
     sp.add_argument("--synthetic", type=int, default=0, metavar="N",
                     help="benchmark against a throwaway store seeded with N synthetic traces")
+    sp.add_argument("--clustered", action="store_true",
+                    help="draw synthetic vectors around topic centers (realistic for"
+                         " embeddings) instead of uniformly (worst case for IVF)")
     sp = sub.add_parser("eval", help="run the scripted memory regression scenario")
     sp.add_argument("--model", default=None, help="answering model to wrap (default qwen3:1.7b)")
     sub.add_parser("mcp", help="run the memory-verbs MCP server on stdio")

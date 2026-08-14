@@ -407,6 +407,210 @@ def test_store_roundtrip(tmp_path=None):
         assert s.queue_depth() == 1
 
 
+def test_ann_index():
+    import tempfile
+
+    from engram.ann import DenseIndex
+
+    rng = np.random.default_rng(3)
+    dim, n = 32, 4000
+
+    def normed(x):
+        return x / np.linalg.norm(x, axis=-1, keepdims=True)
+
+    centers = normed(rng.standard_normal((20, dim)).astype(np.float32))
+    noise = normed(rng.standard_normal((n, dim)).astype(np.float32))
+    mat = normed(centers[np.arange(n) % 20] + 0.55 * noise)
+
+    # below ann_min: exact brute force
+    idx = DenseIndex(dim, ann_min=10_000)
+    idx.build(list(range(1, n + 1)), mat)
+    assert idx.describe().startswith("exact")
+    q = normed(centers[3] + 0.55 * normed(rng.standard_normal(dim).astype(np.float32)))
+    assert idx.search(q, 10) == idx.exact_search(q, 10)
+
+    # past ann_min: IVF active, high recall parity on clustered data
+    idx = DenseIndex(dim, ann_min=1000)
+    idx.build(list(range(1, n + 1)), mat)
+    assert "ivf" in idx.describe()
+    hits = total = 0
+    for i in range(20):
+        q = normed(centers[i % 20] + 0.55 * normed(rng.standard_normal(dim).astype(np.float32)))
+        exact = {t for t, _ in idx.exact_search(q, 10)}
+        got = {t for t, _ in idx.search(q, 10)}
+        hits += len(exact & got)
+        total += len(exact)
+    assert hits / total >= 0.95, f"ivf recall parity {hits / total}"
+
+    # mutations between rebuilds: append findable, tombstone hidden,
+    # in-place replace, exact_max skips the dead
+    probe = normed(np.ones(dim).astype(np.float32))
+    idx.add(n + 1, probe)
+    assert idx.search(probe, 1)[0][0] == n + 1
+    idx.remove(n + 1)
+    assert (n + 1) not in {t for t, _ in idx.search(probe, 5)}
+    assert (n + 1) not in idx
+    idx.add(7, probe)  # replaces id 7's vector in place
+    assert idx.search(probe, 1)[0][0] == 7
+    assert idx.exact_max(probe)[0] == 7
+
+
+def test_store_incremental_index():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        va = np.array([1, 0, 0, 0], dtype=np.float32)
+        vb = np.array([0, 1, 0, 0], dtype=np.float32)
+        a = s.add_trace(1, "fact a", "gist a", "s1", va, "llm")
+        b = s.add_trace(2, "fact b", "gist b", "s2", vb, "llm")
+        # every mutation below must maintain the indexes incrementally -
+        # a full rebuild here means the O(N)-per-write bug is back
+        s._rebuild_index = lambda: (_ for _ in ()).throw(
+            AssertionError("full rebuild on the write path")
+        )
+        assert s.dense_search(va, 1)[0][0] == a
+        s.silence(a)
+        assert a not in {t for t, _ in s.dense_search(va, 2)}
+        assert s.silent_search(va, 1)[0][0] == a  # shadow index, immediately
+        s.resurrect(a)
+        assert s.dense_search(va, 1)[0][0] == a
+        assert s.silent_search(va, 1) == []
+        s.supersede(b, a)
+        assert b not in {t for t, _ in s.dense_search(vb, 2)}
+        s.delete_trace(a)
+        assert s.dense_search(va, 2) == [] or s.dense_search(va, 2)[0][0] != a
+        assert s.index_stale()  # refresher will compact the tombstones
+
+
+def test_fts_nmatch_at_scale():
+    import tempfile
+
+    # the pre-0.5 nmatch used an unordered scan capped at 200 rows per token:
+    # past ~200 matching rows it silently undercounted, killing lexical
+    # admission in big stores. The rowid-constrained MATCH must stay exact.
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        rows = [(i, f"filler {i}", "alpha common filler text") for i in range(1, 301)]
+        rows.append((301, "target", "alpha bravo the one that matters"))
+        s.db.executemany(
+            "INSERT INTO traces(id, title, gist, status) VALUES(?,?,?, 'active')",
+            [(i, t, g) for i, t, g in rows],
+        )
+        s.db.executemany(
+            "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)", rows
+        )
+        s.db.commit()
+        got = {tid: nm for tid, _, nm in s.fts_search(["alpha", "bravo"])}
+        assert got[301] == 2, f"target nmatch {got.get(301)} (undercounted)"
+
+
+def test_lex_prune_big_store():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4, lex_prune_traces=100)
+        blob = np.array([1, 0, 0, 0], dtype=np.float32).tobytes()
+        rows = [(i, f"note {i}", "deploy pipeline routine") for i in range(1, 1101)]
+        rows.append((1101, "target", "deploy zanzibar incident"))
+        s.db.executemany(
+            "INSERT INTO traces(id, title, gist, status, embedding)"
+            " VALUES(?,?,?, 'active', ?)",
+            [(i, t, g, blob) for i, t, g in rows],
+        )
+        s.db.executemany(
+            "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)", rows
+        )
+        s.db.commit()
+        s._rebuild_index()
+        assert s._active.live == 1101
+        # "deploy" is in every row (df 1101 > cap 1000): pruned, so the rare
+        # token still finds the target fast; an all-common cue finds nothing
+        res = s.fts_search(["deploy", "zanzibar"])
+        assert res and res[0][0] == 1101 and res[0][2] == 1
+        assert s.fts_search(["deploy"]) == []
+        # small stores never prune
+        s.lex_prune_traces = 20_000
+        assert s.fts_search(["deploy"]) != []
+
+
+def test_index_staleness_and_snapshot():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "t.db"
+        s = Store(p, embed_dim=4)
+        assert s._active_idx is None  # lazy: no build until dense access
+        assert not s.index_stale()
+        v = np.array([1, 0, 0, 0], dtype=np.float32)
+        tid = s.add_trace(1, "fact", "gist", "s1", v, "llm")
+        assert s.index_stale()  # own write; pure check, not consumed
+        assert s.index_stale()
+        # snapshot rebuild via a private read-only connection; a clean adopt
+        # installs it and clears staleness
+        gen, tg = s.index_marks()
+        pair = s.rebuild_indexes_snapshot()
+        assert pair[0].live == 1
+        assert s.adopt_indexes(pair, gen, tg)
+        assert not s.index_stale()
+        assert s.dense_search(v, 1)[0][0] == tid
+        # a trace mutation from ANOTHER process's Store (the MCP server)
+        # moves the shared traces_gen counter - detected without any
+        # in-process signal. Bookkeeping writes (meta, access, episodes)
+        # deliberately do NOT: the MCP process must not rebuild per chat turn
+        s2 = Store(p, embed_dim=4)
+        vb = np.array([0, 1, 0, 0], dtype=np.float32)
+        s2.add_trace(2, "from mcp", "gist2", "s2", vb, "llm")
+        assert s.index_stale()
+        s.set_meta("last_recall", {"cue": "x"})  # bookkeeping: no signal
+        s.add_access(tid, 0.15)
+        gen, tg = s.index_marks()
+        assert s.adopt_indexes(s.rebuild_indexes_snapshot(), gen, tg)
+        assert not s.index_stale()
+        assert s.dense_search(vb, 1)[0][0] == 2
+        # raw-SQL embedding rewrites (the re-embed path) must announce
+        # themselves: mark_index_write moves both staleness signals
+        gen, tg = s.index_marks()
+        pair = s.rebuild_indexes_snapshot()
+        s.db.execute("UPDATE traces SET embedding=? WHERE id=?",
+                     (vb.tobytes(), tid))
+        s.mark_index_write()
+        assert not s.adopt_indexes(pair, gen, tg), "pre-rewrite snapshot adopted"
+        assert s.index_stale()
+        # the recall-path superseded_by lookup is indexed
+        names = {r[0] for r in s.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        )}
+        assert "idx_traces_superseded_by" in names
+
+
+def test_snapshot_adopt_race():
+    import tempfile
+
+    # a write landing between the snapshot read and the adopt must NOT be
+    # clobbered: installing the stale snapshot would resurrect silenced
+    # traces in the live index and drop fresh ones, and near-dup formation
+    # decisions made in that window are permanent
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        va = np.array([1, 0, 0, 0], dtype=np.float32)
+        vb = np.array([0, 1, 0, 0], dtype=np.float32)
+        a = s.add_trace(1, "stale fact", "old", "s1", va, "llm")
+        gen, dv = s.index_marks()
+        pair = s.rebuild_indexes_snapshot()  # snapshot still contains a
+        b = s.add_trace(2, "correction", "new", "s2", vb, "llm")
+        s.supersede(a, b)                    # races the rebuild
+        assert not s.adopt_indexes(pair, gen, dv), "stale snapshot adopted"
+        assert a not in {t for t, _ in s.dense_search(va, 2)}
+        assert s.dense_search(vb, 1)[0][0] == b
+        assert s.index_stale()  # next cycle retries with a fresh snapshot
+        gen, dv = s.index_marks()
+        assert s.adopt_indexes(s.rebuild_indexes_snapshot(), gen, dv)
+        assert not s.index_stale()
+        assert a not in {t for t, _ in s.dense_search(va, 2)}
+        assert s.max_cosine(va)[0] != a
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

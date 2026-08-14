@@ -151,6 +151,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <tr><td>ENGRAM_SUMMARIZER_MODEL</td><td>qwen3:1.7b</td><td>gist writer. Sub-1B models destroy facts and are unsupported; a missing model falls back to extractive summaries</td></tr>
 <tr><td>ENGRAM_PROFILE_MODEL</td><td>(summarizer)</td><td>model for profile consolidation</td></tr>
 <tr><td>ENGRAM_QUARANTINE</td><td>(empty)</td><td>comma-separated source labels never injected, e.g. <code>observed</code> (all third-party) or <code>observed:Ops Team</code></td></tr>
+<tr><td>ENGRAM_ANN_TRACES</td><td>50000</td><td>store size at which dense search switches from exact to the IVF index (pure numpy, recall parity 1.000 on clustered vectors, benchmarked). Below it there is nothing to tune</td></tr>
 </table></div>
 
 <h2 id="mcp">Memory verbs (MCP)</h2>
@@ -180,6 +181,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <li><b>Admission before ranking.</b> A trace must clear <i>raw</i> relevance thresholds (cosine, or literal token matches) before activation orders anything - so "inject nothing" is the default on unrelated turns, which is what protects small models from distractors.</li>
 <li><b>Adaptive budgets.</b> The upstream model is probed once: &lt;4B params → 2 gists / 350 tokens; 4–14B → 4 / 1000; ≥14B and cloud → 6 / 2000.</li>
 <li><b>Cache-preserving injection.</b> Prompts over ~4k tokens get the block on the newest user message, leaving the cached prefix byte-identical - measured 90s → 2s per turn locally, and it preserves cloud providers' cache-read discounts.</li>
+<li><b>Scales past personal stores.</b> Below 50k memories dense search is a single exact matmul. Past it an IVF index (spherical k-means, pure numpy) bounds every query to a sixteenth of the store, lexical admission prunes tokens present in >2% of traces, and index rebuilds run on a background thread only when something changed - a rebuild that a write raced is discarded, never installed. Measured: 80ms p95 full recall at 100k, 85ms at 250k - still embed-bound. See BENCHMARKS.md.</li>
 </ul>
 
 <h2 id="lifecycle">Memory lifecycle</h2>

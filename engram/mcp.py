@@ -15,7 +15,7 @@ import urllib.request
 
 import numpy as np
 
-from . import formation
+from . import __version__, formation
 from .config import Config
 from .recall import cue_tokens
 from .store import Store
@@ -29,7 +29,10 @@ QUERY_INSTRUCT = (
 class MemoryTools:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.store = Store(cfg.db_path, cfg.embed_dim)
+        # ann_traces disabled: tool calls tolerate an exact-search matmul at
+        # any store size (2.4ms at 100k), and skipping IVF training keeps the
+        # per-call staleness rebuild cheap in this single-threaded server.
+        self.store = Store(cfg.db_path, cfg.embed_dim, 1 << 60, cfg.lex_prune_traces)
 
     # ---------- helpers ----------
 
@@ -345,7 +348,7 @@ def handle(req: dict, tools: MemoryTools):
             "result": {
                 "protocolVersion": req.get("params", {}).get("protocolVersion", "2024-11-05"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "engram-memory", "version": "0.3.0"},
+                "serverInfo": {"name": "engram-memory", "version": __version__},
             },
         }
     if method == "tools/list":
@@ -365,6 +368,13 @@ def handle(req: dict, tools: MemoryTools):
             "memory_stats": lambda: tools.stats(),
         }.get(p.get("name"))
         try:
+            # This long-lived process shares the store with the daemon: pick
+            # up daemon-formed/silenced traces before dense-index verbs, or
+            # search misses new memories and save near-dup-matches silenced
+            # ones. Other verbs work by id against the DB and skip the check.
+            if p.get("name") in ("memory_search", "memory_save", "memory_correct") \
+                    and tools.store.index_stale():
+                tools.store._rebuild_index()
             text = fn() if fn else f"Unknown tool: {p.get('name')}"
             return {"jsonrpc": "2.0", "id": rid,
                     "result": {"content": [{"type": "text", "text": text}]}}

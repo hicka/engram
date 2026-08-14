@@ -51,15 +51,37 @@ class Activity:
 
 
 async def _index_refresher(store: Store):
-    """The MCP server (a separate process) writes to the shared store; rebuild
-    the in-memory dense index periodically so agent-made memories and edits
-    become recallable without a daemon restart. Milliseconds at this scale."""
+    """Keep the in-memory dense indexes fresh: writes from the MCP server (a
+    separate process) become recallable without a daemon restart, and this
+    process's own tombstones and ANN lists get compacted. Skipped entirely
+    when nothing changed; a needed rebuild runs on a worker thread against a
+    private read-only connection, so a 100k-store rebuild never blocks the
+    request path."""
     while True:
         await asyncio.sleep(60)
         try:
-            store._rebuild_index()
+            if store.index_stale():
+                gen, dv = store.index_marks()
+                pair = await asyncio.to_thread(store.rebuild_indexes_snapshot)
+                # False = a write raced the rebuild; the live index is more
+                # current than the snapshot - drop it, retry next cycle
+                store.adopt_indexes(pair, gen, dv)
         except Exception:
-            pass
+            try:
+                store._rebuild_index()  # snapshot path failed; rebuild inline
+            except Exception:
+                pass
+
+
+async def _index_warm(store: Store):
+    """Indexes build lazily (CLI processes never pay for them); the daemon
+    prewarms on a worker thread so the first recall does not."""
+    try:
+        gen, dv = store.index_marks()
+        pair = await asyncio.to_thread(store.rebuild_indexes_snapshot)
+        store.adopt_indexes(pair, gen, dv)
+    except Exception:
+        pass
 
 
 async def _reembed_if_model_changed(store: Store, recall, cfg: Config):
@@ -90,6 +112,9 @@ async def _reembed_if_model_changed(store: Store, recall, cfg: Config):
     except Exception:
         store.db.rollback()
         raise
+    # raw-SQL embedding rewrite: bump the staleness signals, or a snapshot
+    # rebuild racing this would adopt old-model vectors undetectably
+    store.mark_index_write()
     store._rebuild_index()
 
 
@@ -99,7 +124,7 @@ def make_app(cfg: Config) -> web.Application:
     app["sessions"] = {}  # first-message-hash -> [session_uuid, last_seen]
 
     async def on_startup(app):
-        store = Store(cfg.db_path, cfg.embed_dim)
+        store = Store(cfg.db_path, cfg.embed_dim, cfg.ann_traces, cfg.lex_prune_traces)
         http = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=None, connect=5, sock_read=600)
         )
@@ -114,6 +139,7 @@ def make_app(cfg: Config) -> web.Application:
             asyncio.create_task(summarizer.keep_warm()),
             asyncio.create_task(_reembed_if_model_changed(store, recall, cfg)),
             asyncio.create_task(_index_refresher(store)),
+            asyncio.create_task(_index_warm(store)),
         ]
 
     async def on_cleanup(app):

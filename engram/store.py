@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .ann import DenseIndex
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -72,13 +74,22 @@ CREATE TABLE IF NOT EXISTS schemas(
 
 
 class Store:
-    def __init__(self, db_path: Path, embed_dim: int = 256):
-        db_path = Path(db_path).expanduser()
+    def __init__(
+        self, db_path: Path, embed_dim: int = 256,
+        ann_traces: int = 50_000, lex_prune_traces: int = 20_000,
+    ):
+        # resolve(): a relative ENGRAM_DB would make Path.as_uri() raise in
+        # rebuild_indexes_snapshot, silently degrading every rebuild to the
+        # event-loop-blocking inline path
+        db_path = Path(db_path).expanduser().resolve()
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = str(db_path)
         self.db = sqlite3.connect(str(db_path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self.embed_dim = embed_dim
+        self.ann_traces = ann_traces
+        self.lex_prune_traces = lex_prune_traces
         for ddl in (
             "ALTER TABLE traces ADD COLUMN superseded_by INT",
             "ALTER TABLE traces ADD COLUMN beta REAL DEFAULT 0",
@@ -86,6 +97,10 @@ class Store:
             "ALTER TABLE traces ADD COLUMN pinned INT DEFAULT 0",
             "ALTER TABLE episodes ADD COLUMN source TEXT DEFAULT 'user'",
             "ALTER TABLE schemas ADD COLUMN embedding BLOB",
+            # supersedes_something runs per rendered gist on the recall path;
+            # without this index it is a full table scan (34ms at 100k rows).
+            "CREATE INDEX IF NOT EXISTS idx_traces_superseded_by"
+            " ON traces(superseded_by)",
         ):
             try:
                 self.db.execute(ddl)
@@ -93,10 +108,24 @@ class Store:
                 pass  # column already exists
         self._migrate_fts()
         self._migrate_provenance()
-        # In-memory dense index: disposable cache over the traces table.
-        self._ids: list[int] = []
-        self._mat = np.zeros((0, embed_dim), dtype=np.float32)
-        self._rebuild_index()
+        # In-memory dense indexes: disposable caches over the traces table,
+        # built lazily on first dense access (CLI commands like `engram
+        # stats` never pay for them). Writes maintain them incrementally; a
+        # periodic snapshot rebuild (proxy._index_refresher) compacts
+        # tombstones and picks up writes from other processes (the MCP
+        # server). _mut_gen counts this process's index mutations; the
+        # traces_gen meta counter is the cross-process signal, bumped inside
+        # every trace-mutating transaction (data_version was tried and
+        # rejected: it moves on EVERY commit, and the daemon commits recall
+        # bookkeeping each turn, which forced the MCP process into a full
+        # rebuild per tool call). _built_gen/_built_tg mark what the current
+        # indexes reflect, so a snapshot that raced a write is detected and
+        # discarded.
+        self._active_idx: DenseIndex | None = None
+        self._silent_idx: DenseIndex | None = None
+        self._mut_gen = 0
+        self._built_gen = 0
+        self._built_tg = self._traces_gen()
 
     def _migrate_fts(self):
         """v2: porter stemming (peanut matches peanuts). Rebuild from traces
@@ -157,9 +186,14 @@ class Store:
 
     # ---------- dense index ----------
 
-    def _rebuild_index(self):
-        def build(status):
-            rows = self.db.execute(
+    def build_indexes(self, conn) -> tuple[DenseIndex, DenseIndex]:
+        """Build fresh dense indexes from any connection to this database.
+        Called with `self.db` on boot, or with a private read-only connection
+        from a worker thread (rebuild_indexes_snapshot) so a big rebuild
+        never blocks the event loop."""
+
+        def build(status, ann_min):
+            rows = conn.execute(
                 "SELECT id, embedding FROM traces WHERE status=? AND embedding IS NOT NULL",
                 (status,),
             ).fetchall()
@@ -170,25 +204,109 @@ class Store:
                     ids.append(r["id"])
                     vecs.append(v)
             mat = np.vstack(vecs) if vecs else np.zeros((0, self.embed_dim), dtype=np.float32)
-            return ids, mat
+            idx = DenseIndex(self.embed_dim, ann_min=ann_min)
+            idx.build(ids, mat)
+            return idx
 
-        self._ids, self._mat = build("active")
+        active = build("active", self.ann_traces)
         # Silent memories keep a shadow index: availability without
-        # accessibility, until a strong enough cue resurrects one.
-        self._silent_ids, self._silent_mat = build("silent")
+        # accessibility, until a strong enough cue resurrects one. It only
+        # answers when nothing active did, so it stays exact brute force.
+        silent = build("silent", 1 << 60)
+        return active, silent
+
+    @property
+    def _active(self) -> DenseIndex:
+        if self._active_idx is None:
+            self._rebuild_index()
+        return self._active_idx
+
+    @property
+    def _silent(self) -> DenseIndex:
+        if self._silent_idx is None:
+            self._rebuild_index()
+        return self._silent_idx
+
+    def _rebuild_index(self):
+        gen, tg = self.index_marks()
+        self._active_idx, self._silent_idx = self.build_indexes(self.db)
+        self._built_gen, self._built_tg = gen, tg
+
+    def rebuild_indexes_snapshot(self) -> tuple[DenseIndex, DenseIndex]:
+        """Thread-safe rebuild: reads through a private read-only connection
+        (WAL allows concurrent readers), returns indexes for adopt_indexes."""
+        uri = Path(self.db_path).as_uri() + "?mode=ro"  # as_uri percent-escapes
+        conn = sqlite3.connect(uri, uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            return self.build_indexes(conn)
+        finally:
+            conn.close()
+
+    def _traces_gen(self) -> int:
+        row = self.db.execute(
+            "SELECT value FROM meta WHERE key='traces_gen'"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _bump_traces_gen(self):
+        """Ride the caller's trace-mutating transaction (no commit here):
+        the cross-process staleness signal moves only when a trace's
+        row/status/embedding actually changed."""
+        self.db.execute(
+            "INSERT INTO meta(key, value) VALUES('traces_gen','1')"
+            " ON CONFLICT(key) DO UPDATE SET"
+            " value=CAST(CAST(value AS INTEGER)+1 AS TEXT)"
+        )
+
+    def mark_index_write(self):
+        """Record an index-affecting write made outside the store's own
+        mutators (the re-embed path rewrites every embedding via raw SQL):
+        without this, both staleness signals stay quiet - data_version-style
+        own-connection commits are invisible - and a raced snapshot adopt
+        would install pre-write vectors undetectably."""
+        self._bump_traces_gen()
+        self.db.commit()
+        self._mut_gen += 1
+
+    def index_marks(self) -> tuple[int, int]:
+        """Capture (mutation generation, traces generation) BEFORE a
+        snapshot read; adopt_indexes uses them to reject a snapshot that a
+        write raced (conservative: a commit landing between mark and read
+        makes one extra rebuild next cycle, never a lost write)."""
+        return self._mut_gen, self._traces_gen()
+
+    def adopt_indexes(self, pair: tuple[DenseIndex, DenseIndex], gen: int, tg: int) -> bool:
+        """Install a snapshot-built index pair - unless an in-process write
+        raced the rebuild. The incrementally-maintained live index is more
+        current than the snapshot then: installing it would resurrect
+        silenced/superseded traces and drop fresh ones for a cycle, and
+        near-dup checks against that window make PERMANENT formation
+        mistakes. The caller just drops the pair; the next stale cycle
+        rebuilds."""
+        if gen != self._mut_gen:
+            return False
+        self._active_idx, self._silent_idx = pair
+        self._built_gen, self._built_tg = gen, tg
+        return True
+
+    def index_stale(self) -> bool:
+        """True when the in-memory indexes need a snapshot rebuild: either
+        this process wrote (tombstones to compact, ANN lists to refresh) or
+        another process's Store committed a trace mutation (traces_gen
+        moved - how the MCP server's writes become recallable without a
+        daemon restart, and vice versa). Pure check: consuming happens only
+        on successful adopt/rebuild."""
+        return self._mut_gen != self._built_gen or self._traces_gen() != self._built_tg
 
     def silent_search(self, qvec: np.ndarray, k: int = 3) -> list[tuple[int, float]]:
-        if getattr(self, "_silent_mat", None) is None or self._silent_mat.shape[0] == 0:
-            return []
-        sims = self._silent_mat @ qvec.astype(np.float32)
-        top = np.argsort(-sims)[:k]
-        return [(self._silent_ids[i], float(sims[i])) for i in top]
+        return self._silent.search(qvec, k)
 
     def resurrect(self, trace_id: int):
         """A silenced memory answered a strong cue: back to active, back into
         both indexes (the ecphory path for silent engrams)."""
         row = self.db.execute(
-            "SELECT t.id, t.title, t.gist, e.user_text FROM traces t"
+            "SELECT t.id, t.title, t.gist, t.embedding, e.user_text FROM traces t"
             " LEFT JOIN episodes e ON e.id=t.episode_id WHERE t.id=?",
             (trace_id,),
         ).fetchone()
@@ -201,15 +319,21 @@ class Store:
             "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)",
             (trace_id, row["title"], f"{row['gist']}\n{extra}".strip()),
         )
+        self._bump_traces_gen()
         self.db.commit()
-        self._rebuild_index()
+        self._silent.remove(trace_id)
+        self._index_add(self._active, trace_id, row["embedding"])
+        self._mut_gen += 1
+
+    def _index_add(self, index: DenseIndex, trace_id: int, blob):
+        if blob is None:
+            return
+        v = np.frombuffer(blob, dtype=np.float32)
+        if v.shape[0] == self.embed_dim:
+            index.add(trace_id, v)
 
     def dense_search(self, qvec: np.ndarray, k: int = 40) -> list[tuple[int, float]]:
-        if self._mat.shape[0] == 0:
-            return []
-        sims = self._mat @ qvec.astype(np.float32)
-        top = np.argsort(-sims)[:k]
-        return [(self._ids[i], float(sims[i])) for i in top]
+        return self._active.search(qvec, k)
 
     # ---------- episodes ----------
 
@@ -225,7 +349,11 @@ class Store:
                 (ns, session_id, user_text, assistant_text, model, time.time(), sha, source),
             )
         except sqlite3.IntegrityError:
-            return None  # byte-identical repeat (agent retry loop)
+            # byte-identical repeat (agent retry loop). Roll back or the
+            # implicit transaction stays open and holds the WAL write lock,
+            # blocking every other process's writes until our next commit.
+            self.db.rollback()
+            return None
         eid = cur.lastrowid
         self.db.execute(
             "INSERT INTO jobs(episode_id, enqueued) VALUES(?,?)", (eid, time.time())
@@ -266,10 +394,11 @@ class Store:
             "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)",
             (tid, title, f"{gist}\n{fts_extra}".strip()),
         )
+        self._bump_traces_gen()
         self.db.commit()
         if embedding is not None:
-            self._ids.append(tid)
-            self._mat = np.vstack([self._mat, embedding.astype(np.float32)[None, :]])
+            self._active.add(tid, embedding.astype(np.float32))
+            self._mut_gen += 1
         return tid
 
     def supersede(self, old_id: int, new_id: int):
@@ -280,23 +409,36 @@ class Store:
             (new_id, old_id),
         )
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (old_id,))
+        self._bump_traces_gen()
         self.db.commit()
-        self._rebuild_index()
+        self._active.remove(old_id)
+        self._silent.remove(old_id)
+        self._mut_gen += 1
 
     def silence(self, trace_id: int):
         """Forgetting is retrieval failure, not deletion: kept on disk, out of
         the recall indexes, into the silent shadow index (resurrectable)."""
+        row = self.db.execute(
+            "SELECT embedding FROM traces WHERE id=?", (trace_id,)
+        ).fetchone()
         self.db.execute("UPDATE traces SET status='silent' WHERE id=?", (trace_id,))
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (trace_id,))
+        self._bump_traces_gen()
         self.db.commit()
-        self._rebuild_index()
+        self._active.remove(trace_id)
+        if row is not None:
+            self._index_add(self._silent, trace_id, row["embedding"])
+        self._mut_gen += 1
 
     def delete_trace(self, trace_id: int):
         """Hard deletion - privacy path only."""
         self.db.execute("DELETE FROM traces WHERE id=?", (trace_id,))
         self.db.execute("DELETE FROM trace_fts WHERE rowid=?", (trace_id,))
+        self._bump_traces_gen()
         self.db.commit()
-        self._rebuild_index()
+        self._active.remove(trace_id)
+        self._silent.remove(trace_id)
+        self._mut_gen += 1
 
     def edit_trace(self, trace_id: int, title: str, gist: str, embedding=None):
         blob = embedding.astype(np.float32).tobytes() if embedding is not None else None
@@ -314,8 +456,15 @@ class Store:
             "INSERT INTO trace_fts(rowid, title, gist) VALUES(?,?,?)",
             (trace_id, title, gist),
         )
+        self._bump_traces_gen()
         self.db.commit()
-        self._rebuild_index()
+        if blob is not None:
+            # replace the vector wherever the trace currently lives
+            for idx in (self._active, self._silent):
+                if trace_id in idx:
+                    self._index_add(idx, trace_id, blob)
+                    break
+            self._mut_gen += 1
 
     def set_pinned(self, trace_id: int, pinned: bool):
         self.db.execute(
@@ -355,39 +504,66 @@ class Store:
         ).fetchall()
         return {r["id"]: r for r in rows}
 
+    def _prune_common_tokens(self, tokens: list[str]) -> list[str]:
+        """Big stores only: drop cue tokens present in more than ~2% of
+        traces. They carry no discriminative evidence (bm25's idf already
+        scores them near zero) but force FTS5 to rank every posting - the
+        dominant recall cost at 100k rows. The probe is a capped scan, so
+        its own cost is bounded regardless of true document frequency."""
+        n = self._active.live
+        if n < self.lex_prune_traces:
+            return tokens
+        cap = max(1000, n // 50)
+        kept = []
+        for t in tokens:
+            c = self.db.execute(
+                "SELECT count(*) FROM (SELECT rowid FROM trace_fts"
+                " WHERE trace_fts MATCH ? LIMIT ?)",
+                (f'"{t}"', cap + 1),
+            ).fetchone()[0]
+            if c <= cap:
+                kept.append(t)
+        return kept
+
     def fts_search(self, tokens: list[str], k: int = 40) -> list[tuple[int, float, int]]:
         """Returns (trace_id, score, nmatch): score = -bm25 (bigger is better),
         nmatch = how many distinct query tokens the row matched. bm25 magnitudes
         collapse under FTS5's idf clamp in small stores, so admission uses
-        nmatch - raw literal evidence - instead."""
+        nmatch - raw literal evidence - instead. nmatch is computed with a
+        rowid-constrained MATCH per token: exact at any store size (a capped
+        unordered scan undercounted it past ~10k rows) and identical stemming
+        semantics to the main query."""
         if not tokens:
             return []
-        match = " OR ".join(f'"{t}"' for t in tokens)
         try:
+            tokens = self._prune_common_tokens(tokens)
+            if not tokens:
+                return []
+            match = " OR ".join(f'"{t}"' for t in tokens)
             rows = self.db.execute(
                 "SELECT rowid, bm25(trace_fts) AS b FROM trace_fts WHERE trace_fts MATCH ?"
                 " ORDER BY b LIMIT ?",
                 (match, k),
             ).fetchall()
             counts: dict[int, int] = {}
-            candidate_ids = {r["rowid"] for r in rows}
-            for t in tokens:
-                for m in self.db.execute(
-                    "SELECT rowid FROM trace_fts WHERE trace_fts MATCH ? LIMIT 200",
-                    (f'"{t}"',),
-                ).fetchall():
-                    if m["rowid"] in candidate_ids:
+            cand = [r["rowid"] for r in rows]
+            if cand:
+                ph = ",".join("?" * len(cand))
+                for t in tokens:
+                    for m in self.db.execute(
+                        f"SELECT rowid FROM trace_fts WHERE trace_fts MATCH ?"
+                        f" AND rowid IN ({ph})",
+                        (f'"{t}"', *cand),
+                    ).fetchall():
                         counts[m["rowid"]] = counts.get(m["rowid"], 0) + 1
         except sqlite3.OperationalError:
             return []
         return [(r["rowid"], -r["b"], counts.get(r["rowid"], 0)) for r in rows]
 
     def max_cosine(self, vec: np.ndarray) -> tuple[int | None, float]:
-        if self._mat.shape[0] == 0:
-            return None, 0.0
-        sims = self._mat @ vec.astype(np.float32)
-        i = int(np.argmax(sims))
-        return self._ids[i], float(sims[i])
+        # Write-path near-duplicate detection: stays exact even when
+        # dense_search is approximate (a missed near-dup pollutes the store).
+        return self._active.exact_max(vec.astype(np.float32))
 
     # ---------- jobs ----------
 
