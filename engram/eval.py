@@ -60,7 +60,7 @@ PROBES = [
     dict(name="P2-literal-token", q="The deploy is failing with ECONNRESET again. What was the fix?",
          block=["pgsslmode"], reply=["pgsslmode"]),
     dict(name="P3-deadline", q="When is my database migration due, and who set the deadline?",
-         block=["november 15", "elena"], reply=["november 15"]),
+         block=[["november 15", "nov 15"], "elena"], reply=[["november 15", "nov 15"]]),
     dict(name="P4-rename", q="What did we rename the auth service to?",
          block=["gatekeeper"], reply=["gatekeeper"]),
     dict(name="P5-trip-constraints", q="I'm booking restaurants for the Japan trip. Any constraints I should remember?",
@@ -159,12 +159,16 @@ async def run_eval(cfg: Config, model: str = DEFAULT_MODEL):
                     answer = retrieval
                     note = "recall skipped" if retrieval else "recall RAN on smalltalk"
                 else:
-                    needles = [n.lower() for n in p["block"]]
-                    hits = [n for n in needles if n in bl]
+                    # a needle may be a list of alternates (any one counts)
+                    def hit(n, hay):
+                        alts = n if isinstance(n, list) else [n]
+                        return any(a.lower() in hay for a in alts)
+                    needles = p["block"]
+                    hits = [n for n in needles if hit(n, bl)]
                     retrieval = bool(hits) if p.get("any_of") else len(hits) == len(needles)
                     if p.get("block_must_not") and any(n.lower() in bl for n in p["block_must_not"]):
                         retrieval = False
-                    answer = all(n.lower() in rl for n in p.get("reply", []))
+                    answer = all(hit(n, rl) for n in p.get("reply", []))
                     note = f"block hit {len(hits)}/{len(needles)}"
                     if p.get("known_gap"):
                         note += f" · known gap: {p['known_gap']}"
