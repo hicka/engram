@@ -85,6 +85,7 @@ class Summarizer:
                 worked = await self.tick()
                 if not worked:
                     await self.maybe_consolidate()
+                    await self.maybe_topics()
                     self.maybe_decay()
             except Exception:
                 worked = False
@@ -171,6 +172,54 @@ class Summarizer:
             return
         self.store.set_profile(text, [r["id"] for r in rows])
         self.store.set_meta("profile_high_water", fresh["m"] or hw)
+
+    async def maybe_topics(self):
+        """Thematic consolidation: cluster related user memories and keep one
+        topic summary per cluster. Rebuilt whole from traces each time
+        (derived cache, single-level, no compounding drift)."""
+        if self.activity.in_flight > 0 or self.store.queue_depth() > 0:
+            return
+        if time.time() - self.activity.last_done < self.cfg.idle_before_summarize_s:
+            return
+        if time.time() - (self.store.get_meta("topic_last_attempt") or 0) < self.cfg.topic_cooldown_s:
+            return
+        hw = self.store.get_meta("topic_high_water") or 0
+        fresh = self.store.db.execute(
+            "SELECT COUNT(*) c, MAX(id) m FROM traces WHERE status='active'"
+            " AND (source='user' OR source IS NULL) AND id > ?", (hw,)
+        ).fetchone()
+        if (fresh["c"] or 0) < self.cfg.topic_refresh_traces:
+            return
+        if await self._big_model_resident():
+            return
+        self.store.set_meta("topic_last_attempt", time.time())
+
+        clusters = profile.cluster_topics(self.store)
+        if not clusters:
+            self.store.set_meta("topic_high_water", fresh["m"] or hw)
+            return
+        results = []
+        for rows, centroid in clusters:
+            try:
+                async with asyncio.timeout(120):
+                    async with self.http.post(
+                        f"{self.cfg.services_url}/api/chat",
+                        json={
+                            "model": self.cfg.profile_model or self.cfg.summarizer_model,
+                            "stream": False, "think": False, "keep_alive": "2m",
+                            "options": {"temperature": 0.2, "top_p": 0.8, "num_predict": 220},
+                            "messages": profile.build_topic_messages(rows),
+                        },
+                    ) as resp:
+                        data = await resp.json()
+                text = profile.validate_topic(data["message"]["content"])
+            except Exception:
+                text = None
+            if text is not None:
+                results.append((text, [r["id"] for r in rows], centroid))
+        if results:
+            self.store.replace_topics(results)
+            self.store.set_meta("topic_high_water", fresh["m"] or hw)
 
     async def tick(self) -> bool:
         """Process one job if the proxy is idle. Returns True if a job ran."""

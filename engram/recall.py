@@ -251,8 +251,23 @@ class Recall:
             if prow is not None:
                 profile_text = prow["gist"]
 
-        if kept or profile_text:
-            block, shown = self._render(kept, profile_text, limits)
+        # Topic schemas: a broad cue near a cluster's centroid injects the
+        # cluster's synthesis alongside (or instead of) point traces.
+        topic_text = None
+        if qvec is not None:
+            best = 0.0
+            for t in self.store.topics():
+                if t["embedding"] is None:
+                    continue
+                tv = np.frombuffer(t["embedding"], dtype=np.float32)
+                if tv.shape[0] != qvec.shape[0]:
+                    continue
+                c = float(tv @ qvec)
+                if c >= self.cfg.topic_admit_cosine and c > best:
+                    best, topic_text = c, t["gist"]
+
+        if kept or profile_text or topic_text:
+            block, shown = self._render(kept, profile_text, limits, topic_text)
         else:
             block, shown = None, []
         if block is not None and not dry_run:
@@ -287,7 +302,7 @@ class Recall:
 
     def _render(
         self, kept: list[dict], profile_text: str | None = None,
-        limits: tuple | None = None,
+        limits: tuple | None = None, topic_text: str | None = None,
     ) -> tuple[str | None, list[int]]:
         """Fit admitted traces to the token budget: gist tier first, overflow
         demotes to the title tier (never silently dropped). Returns the block
@@ -304,6 +319,9 @@ class Recall:
         if profile_text:
             profile_part = ["User profile (distilled from memory):", profile_text]
             budget -= est_tokens(profile_text) + 10
+        if topic_text and est_tokens(topic_text) + 8 <= budget:
+            profile_part.append(f"Topic summary: {topic_text}")
+            budget -= est_tokens(topic_text) + 8
         lines, titles, shown = [], [], []
         for c in kept:
             if len(lines) < max_gists:

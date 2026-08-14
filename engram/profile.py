@@ -59,6 +59,67 @@ def build_messages(rows) -> list[dict]:
     ]
 
 
+TOPIC_PROMPT = (
+    "You summarize one cluster of related memory notes into a single topic"
+    " summary. Write ONE paragraph, at most 80 words, naming the topic and its"
+    " durable facts with exact names, numbers, and values. Only facts present"
+    " in the notes; no advice, no speculation, no introduction."
+)
+
+
+def cluster_topics(store, sim: float = 0.55, min_size: int = 3, max_clusters: int = 4):
+    """Greedy embedding clustering over active user-source traces. Returns up
+    to max_clusters lists of rows, largest first. Pure arithmetic."""
+    import numpy as np
+
+    rows = store.db.execute(
+        "SELECT id, gist, embedding FROM traces WHERE status='active'"
+        " AND (source='user' OR source IS NULL) AND embedding IS NOT NULL"
+    ).fetchall()
+    items = []
+    for r in rows:
+        v = np.frombuffer(r["embedding"], dtype=np.float32)
+        if v.shape[0] == store.embed_dim:
+            items.append((r, v))
+    unassigned = list(range(len(items)))
+    clusters = []
+    while unassigned:
+        seed = unassigned.pop(0)
+        members = [seed]
+        rest = []
+        for j in unassigned:
+            if float(items[seed][1] @ items[j][1]) >= sim:
+                members.append(j)
+            else:
+                rest.append(j)
+        unassigned = rest
+        if len(members) >= min_size:
+            clusters.append(members)
+    clusters.sort(key=len, reverse=True)
+    out = []
+    for c in clusters[:max_clusters]:
+        rows_c = [items[i][0] for i in c]
+        centroid = np.mean([items[i][1] for i in c], axis=0)
+        n = np.linalg.norm(centroid)
+        out.append((rows_c, centroid / n if n > 0 else centroid))
+    return out
+
+
+def build_topic_messages(rows) -> list[dict]:
+    notes = "\n".join(f"- {r['gist']}" for r in rows)
+    return [
+        {"role": "system", "content": TOPIC_PROMPT},
+        {"role": "user", "content": f"Memory notes:\n{notes}"},
+    ]
+
+
+def validate_topic(text: str) -> str | None:
+    text = " ".join(_THINK_RE.sub("", text or "").split())
+    if not (20 <= len(text) <= 700) or "as an ai" in text.lower():
+        return None
+    return text
+
+
 def validate(text: str) -> str | None:
     """Clean and sanity-check the model's profile. None = reject."""
     text = _THINK_RE.sub("", text or "").strip()

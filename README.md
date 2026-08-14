@@ -72,7 +72,8 @@ hybrid BM25 + brute-force dense with **admission on raw thresholds** (unrelated
 turns inject nothing), ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
-so the rich-get-richer loop stays closed. Injection is budgeted for small
+so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;
+silent memories resurrect on strong cues. Injection is budgeted for small
 models: ≤2 gists + 2 titles, ≤350 tokens, placed first in the system message.
 Failures fail open: a slow or broken pipeline degrades to a plain proxy.
 

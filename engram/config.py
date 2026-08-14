@@ -61,6 +61,10 @@ class Config:
     # invention). qwen3:4b thinking mode was tried and never converges on
     # this task; override via env if a stronger non-qwen model is available.
     profile_model: str = os.environ.get("ENGRAM_PROFILE_MODEL", "")
+    # topic consolidation: thematic cluster summaries, rebuilt whole
+    topic_refresh_traces: int = 10
+    topic_cooldown_s: float = 1800.0
+    topic_admit_cosine: float = 0.35  # cue-to-topic-centroid gate at recall
     admit_bm25: float = 1.2  # -bm25() score floor for lexical admission
     max_gists: int = 2  # tier S (<4B upstream)
     max_titles: int = 2

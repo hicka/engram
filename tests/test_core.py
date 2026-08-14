@@ -311,6 +311,41 @@ def test_profile_store_roundtrip():
         assert s.db.execute("SELECT COUNT(*) c FROM schemas").fetchone()["c"] == 1
 
 
+def test_topic_clustering():
+    import tempfile
+
+    from engram.profile import cluster_topics, validate_topic
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        a = np.array([1, 0, 0, 0], dtype=np.float32)
+        b = np.array([0, 1, 0, 0], dtype=np.float32)
+        # five traces near direction a, two near b (below min_size)
+        for i in range(5):
+            v = a + np.array([0, 0.15 * (i % 2), 0.1, 0], dtype=np.float32)
+            v /= np.linalg.norm(v)
+            s.add_trace(None, f"deploy note {i}", f"deploy pipeline fact {i}", "s1", v, "llm")
+        for i in range(2):
+            s.add_trace(None, f"trip note {i}", f"travel fact {i}", "s1", b, "llm")
+        clusters = cluster_topics(s, sim=0.55, min_size=3)
+        assert len(clusters) == 1
+        rows, centroid = clusters[0]
+        assert len(rows) == 5
+        assert float(centroid @ a) > 0.9  # centroid points at the cluster
+        # topic storage roundtrip + retrieval math
+        s.replace_topics([("Deploy pipeline: five related facts.", [r["id"] for r in rows], centroid)])
+        topics = s.topics()
+        assert len(topics) == 1
+        tv = np.frombuffer(topics[0]["embedding"], dtype=np.float32)
+        assert float(tv @ a) > 0.9
+        s.replace_topics([])  # rebuild-whole semantics
+        assert len(s.topics()) == 0
+
+    assert validate_topic("Project X uses Postgres 16 and ships March 3rd.") is not None
+    assert validate_topic("") is None
+    assert validate_topic("<think>hmm</think> ok") is None  # too short after strip
+
+
 def test_silent_resurrection():
     import tempfile
 

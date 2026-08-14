@@ -1,6 +1,6 @@
 [project]
 name = "engram-proxy"
-version = "0.3.0"
+version = "0.4.0"
 description = "Transparent memory sidecar for local and cloud LLMs - ACT-R activation scoring, provenance-aware formation, ~90ms recall, one SQLite file"
 readme = "README.md"
 license = {file = "LICENSE"}

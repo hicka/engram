@@ -95,7 +95,7 @@
     <div class="step"><div><b>Recall - pure arithmetic, no LLM</b>Hybrid BM25 + dense search with admission on raw thresholds: unrelated turns inject nothing. Candidates are ranked by ACT-R activation - frequency and recency with power-law decay, plus write-time importance and graph priming.</div></div>
     <div class="step"><div><b>Inject - budgeted for the model that's answering</b>Small local models get 2 gists (they measurably drown past 4 passages); 14B+ and cloud models get 6. Big agent prompts get the block on the newest message so provider prompt caches survive - measured 90s → 2s per turn on a 23k-token agent prompt.</div></div>
     <div class="step"><div><b>Form - write-behind, provenance-aware</b>A background summarizer (only when the GPU is idle) distills each exchange. Your words form memory at full strength; third-party content a gateway relays is tagged, half-weighted, and can never overwrite what you said; framework plumbing never becomes memory at all.</div></div>
-    <div class="step"><div><b>Live - reinforce, supersede, consolidate, forget</b>Used memories strengthen and orbit closer. Corrections supersede (history kept, never re-injected). An idle-time consolidator maintains a user profile for "what do you know about me". Unused memories decay silent after weeks - recoverable, never deleted.</div></div>
+    <div class="step"><div><b>Live - reinforce, supersede, consolidate, forget</b>Used memories strengthen and orbit closer. Corrections supersede (history kept, never re-injected). An idle-time consolidator maintains a user profile plus per-topic summaries of related memory clusters. Unused memories decay silent after weeks - recoverable, never deleted.</div></div>
   </div>
 </section>
 

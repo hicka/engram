@@ -85,6 +85,7 @@ class Store:
             "ALTER TABLE traces ADD COLUMN source TEXT DEFAULT 'user'",
             "ALTER TABLE traces ADD COLUMN pinned INT DEFAULT 0",
             "ALTER TABLE episodes ADD COLUMN source TEXT DEFAULT 'user'",
+            "ALTER TABLE schemas ADD COLUMN embedding BLOB",
         ):
             try:
                 self.db.execute(ddl)
@@ -468,6 +469,23 @@ class Store:
         return self.db.execute(
             "SELECT * FROM schemas WHERE kind='profile'"
         ).fetchone()
+
+    def replace_topics(self, topics: list[tuple[str, list[int], "np.ndarray"]]):
+        """Topics are derived caches: each consolidation rebuilds them whole
+        (single-level by design, no identity tracking, no drift)."""
+        now = time.time()
+        self.db.execute("DELETE FROM schemas WHERE kind='topic'")
+        for gist, ids, emb in topics:
+            blob = emb.astype(np.float32).tobytes() if emb is not None else None
+            self.db.execute(
+                "INSERT INTO schemas(kind, gist, source_ids, created_ts, updated_ts, embedding)"
+                " VALUES('topic',?,?,?,?,?)",
+                (gist, json.dumps(ids), now, now, blob),
+            )
+        self.db.commit()
+
+    def topics(self):
+        return self.db.execute("SELECT * FROM schemas WHERE kind='topic'").fetchall()
 
     # ---------- meta ----------
 
