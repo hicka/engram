@@ -257,6 +257,36 @@ async def _chat(http, api: str, base: str, model: str, system: str, user: str,
     return "".join(out).strip()
 
 
+async def _serve_watch(out_path: Path, port: int, total: int):
+    """Live dashboard for a running eval: serves lme_watch.html plus the
+    current results file. The run rewrites results atomically after every
+    question, so the page just polls /data - watch a benchmark the way you
+    watch the observatory."""
+    from aiohttp import web
+
+    html = (Path(__file__).parent / "lme_watch.html").read_text()
+
+    async def index(_):
+        return web.Response(text=html, content_type="text/html")
+
+    async def data(_):
+        try:
+            payload = json.loads(out_path.read_text())
+        except Exception:
+            payload = {"rows": []}
+        payload["total"] = total
+        return web.json_response(payload)
+
+    app = web.Application()
+    app.router.add_get("/", index)
+    app.router.add_get("/data", data)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    print(f"watch: http://127.0.0.1:{port}", flush=True)
+    return runner
+
+
 def _write_atomic(path: Path, data: dict):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
@@ -291,6 +321,9 @@ async def run(cfg: Config, args) -> None:
         except Exception:
             rows, done_ids = [], set()
     t_start = time.time()
+    watch = None
+    if args.watch:
+        watch = await _serve_watch(out_path, args.watch, len(picked))
     async with aiohttp.ClientSession() as http:
         for i, q in enumerate(picked, 1):
             qid = str(q["question_id"])
@@ -351,6 +384,35 @@ async def run(cfg: Config, args) -> None:
     if not args.no_judge:
         await judge(cfg, args)
     _report(json.loads(out_path.read_text()))
+    if watch is not None:
+        await watch.cleanup()
+
+
+async def reanswer(cfg: Config, args) -> None:
+    """Re-run the answering step over stored blocks (no re-ingestion) - for
+    swapping the answering model. Clears judge verdicts on changed rows."""
+    out_path = Path(args.out)
+    data = json.loads(out_path.read_text())
+    async with aiohttp.ClientSession() as http:
+        for i, row in enumerate(data["rows"], 1):
+            block = row.get("block")
+            system = (
+                "You are an assistant with a memory of past conversations"
+                " with this user."
+                + (f"\n\n{block}" if block else "")
+                + "\nAnswer from these memories. If they do not contain"
+                " the answer, say you do not know. Be brief."
+            )
+            user = f"Today is {row.get('question_date', '')}. {row['question']}"
+            row["hypothesis"] = await _chat(
+                http, args.answer_api, args.answer_base or cfg.services_url,
+                args.answer_model, system, user)
+            row.pop("judged_correct", None)
+            row.pop("judge_model", None)
+            data["config"]["answer_model"] = args.answer_model
+            data["config"]["answer_api"] = args.answer_api
+            _write_atomic(out_path, data)
+            print(f"[{i}/{len(data['rows'])}] re-answered", flush=True)
 
 
 async def judge(cfg: Config, args) -> None:
@@ -403,8 +465,19 @@ def _report(data: dict) -> None:
 
 def main(cfg: Config, args) -> None:
     if args.judge_only:
-        asyncio.run(judge(cfg, args))
+        async def _judge_watched():
+            watch = None
+            if args.watch:
+                total = len(json.loads(Path(args.out).read_text())["rows"])
+                watch = await _serve_watch(Path(args.out), args.watch, total)
+            await judge(cfg, args)
+            if watch is not None:
+                await watch.cleanup()
+
+        asyncio.run(_judge_watched())
         _report(json.loads(Path(args.out).read_text()))
+    elif args.reanswer:
+        asyncio.run(reanswer(cfg, args))
     else:
         asyncio.run(run(cfg, args))
 
@@ -419,12 +492,17 @@ def add_parser(sub) -> None:
                     default="ollama")
     sp.add_argument("--answer-base", default="",
                     help="answer endpoint base URL (default: local Ollama)")
-    sp.add_argument("--answer-model", default="qwen3:4b")
+    sp.add_argument("--answer-model", default="qwen3:1.7b")
     sp.add_argument("--judge-api", choices=("ollama", "anthropic"),
                     default="ollama")
     sp.add_argument("--judge-base", default="")
-    sp.add_argument("--judge-model", default="qwen3:4b")
+    sp.add_argument("--judge-model", default="qwen3:1.7b")
+    sp.add_argument("--watch", type=int, default=0, metavar="PORT",
+                    help="serve a live progress dashboard on this port")
     sp.add_argument("--no-judge", action="store_true")
     sp.add_argument("--judge-only", action="store_true",
                     help="re-score an existing results file")
     sp.add_argument("--rejudge", action="store_true")
+    sp.add_argument("--reanswer", action="store_true",
+                    help="re-answer from stored blocks (swap answer model"
+                         " without re-ingesting)")

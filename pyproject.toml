@@ -30,4 +30,4 @@ build-backend = "setuptools.build_meta"
 packages = ["engram"]
 
 [tool.setuptools.package-data]
-engram = ["ui.html"]
+engram = ["ui.html", "lme_watch.html"]

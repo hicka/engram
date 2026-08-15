@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>engram · longmemeval live</title>
+<style>
+  :root{--void:#05080F;--panel:#0A111C;--syn:#46E0E6;--syn-dim:#1E8B90;--ember:#E0913F;
+        --text:#C8D8DE;--faint:#5E7280;--line:rgba(70,224,230,0.16)}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--void);color:var(--text);font-family:ui-monospace,"SF Mono",Menlo,monospace;
+       padding:28px;max-width:1080px;margin:0 auto}
+  h1{font-size:15px;letter-spacing:0.3em;color:var(--syn);font-weight:500}
+  .sub{font-size:11px;color:var(--faint);letter-spacing:0.14em;margin:4px 0 22px}
+  .bar{height:10px;background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--syn-dim),var(--syn));
+         width:0%;transition:width 0.8s;box-shadow:0 0 12px rgba(70,224,230,0.5)}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0 26px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px 14px}
+  .stat .n{font-size:22px;color:var(--syn);font-variant-numeric:tabular-nums}
+  .stat .l{font-size:9.5px;color:var(--faint);letter-spacing:0.14em;text-transform:uppercase;margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:26px}
+  th{text-align:left;color:var(--syn-dim);font-weight:500;letter-spacing:0.1em;font-size:10.5px;
+     text-transform:uppercase;padding:6px 10px;border-bottom:1px solid var(--line)}
+  td{padding:6px 10px;border-bottom:1px solid rgba(94,114,128,0.12);font-variant-numeric:tabular-nums}
+  td.r,th.r{text-align:right}
+  .feed{display:flex;flex-direction:column;gap:5px}
+  .row{display:flex;gap:12px;align-items:baseline;background:var(--panel);border:1px solid var(--line);
+       border-radius:4px;padding:7px 12px;font-size:12px}
+  .row:first-child{border-color:var(--syn-dim);box-shadow:0 0 14px rgba(70,224,230,0.10)}
+  .chip{font-size:10px;letter-spacing:0.1em;padding:1px 8px;border-radius:3px;flex:none}
+  .pass{color:var(--syn);border:1px solid var(--syn-dim)}
+  .miss{color:var(--ember);border:1px solid var(--ember)}
+  .na{color:var(--faint);border:1px solid rgba(94,114,128,0.4)}
+  .qid{color:var(--faint);flex:none;width:14ch;overflow:hidden;text-overflow:ellipsis}
+  .qt{color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ms{color:var(--faint);flex:none}
+  #idle{color:var(--faint);font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>ENGRAM &middot; LONGMEMEVAL</h1>
+<div class="sub" id="sub">connecting&hellip;</div>
+<div class="bar"><i id="fill"></i></div>
+<div class="stats">
+  <div class="stat"><div class="n" id="prog">-</div><div class="l">questions</div></div>
+  <div class="stat"><div class="n" id="retr">-</div><div class="l">retrieval</div></div>
+  <div class="stat"><div class="n" id="ans">-</div><div class="l">judged answers</div></div>
+  <div class="stat"><div class="n" id="p50">-</div><div class="l">recall p50</div></div>
+  <div class="stat"><div class="n" id="formed">-</div><div class="l">traces / question</div></div>
+  <div class="stat"><div class="n" id="eta">-</div><div class="l">est. remaining</div></div>
+</div>
+<table id="cats"><thead><tr>
+  <th>category</th><th class="r">n</th><th class="r">retrieval</th><th class="r">answer</th>
+</tr></thead><tbody></tbody></table>
+<div class="feed" id="feed"></div>
+<div id="idle"></div>
+<script>
+const t0 = Date.now();
+let firstSeen = null, firstCount = 0;
+async function tick(){
+  let d;
+  try { d = await (await fetch("/data", {cache:"no-store"})).json(); }
+  catch(e){ document.getElementById("sub").textContent = "waiting for run…"; return; }
+  const rows = d.rows || [], total = d.total || 100;
+  if (firstSeen === null){ firstSeen = Date.now(); firstCount = rows.length; }
+  const scored = rows.filter(r => r.retrieval_ok !== null && r.retrieval_ok !== undefined);
+  const hits = scored.filter(r => r.retrieval_ok).length;
+  const judged = rows.filter(r => "judged_correct" in r);
+  const good = judged.filter(r => r.judged_correct).length;
+  document.getElementById("sub").textContent =
+    (d.config ? `${d.config.answer_api || "ollama"} · ${d.config.answer_model || ""} · ` : "") +
+    `${rows.length < total ? "running" : (judged.length < rows.length ? "judging" : "complete")}`;
+  document.getElementById("fill").style.width = (100 * rows.length / total) + "%";
+  document.getElementById("prog").textContent = `${rows.length}/${total}`;
+  document.getElementById("retr").textContent = scored.length ? `${hits}/${scored.length}` : "-";
+  document.getElementById("ans").textContent = judged.length ? `${good}/${judged.length}` : "-";
+  const ms = rows.map(r => r.recall_ms).sort((a,b)=>a-b);
+  document.getElementById("p50").textContent = ms.length ? Math.round(ms[Math.floor(ms.length/2)]) + "ms" : "-";
+  const fm = rows.map(r => r.formed);
+  document.getElementById("formed").textContent =
+    fm.length ? Math.round(fm.reduce((a,b)=>a+b,0)/fm.length) : "-";
+  const done = rows.length - firstCount, left = total - rows.length;
+  if (done > 2 && left > 0){
+    const per = (Date.now() - firstSeen) / done;
+    const m = Math.round(per * left / 60000);
+    document.getElementById("eta").textContent = m > 90 ? (m/60).toFixed(1) + "h" : m + "m";
+  } else if (left === 0) document.getElementById("eta").textContent = "0m";
+  const by = {};
+  for (const r of rows){
+    const b = by[r.type] = by[r.type] || {n:0, sc:0, hit:0, jd:0, ok:0};
+    b.n++;
+    if (r.retrieval_ok !== null && r.retrieval_ok !== undefined){ b.sc++; if (r.retrieval_ok) b.hit++; }
+    if ("judged_correct" in r){ b.jd++; if (r.judged_correct) b.ok++; }
+  }
+  document.querySelector("#cats tbody").innerHTML = Object.keys(by).sort().map(t => {
+    const b = by[t];
+    return `<tr><td>${t}</td><td class="r">${b.n}</td>` +
+      `<td class="r">${b.sc ? b.hit + "/" + b.sc : "n/a"}</td>` +
+      `<td class="r">${b.jd ? b.ok + "/" + b.jd : "-"}</td></tr>`;
+  }).join("");
+  document.getElementById("feed").innerHTML = rows.slice(-12).reverse().map(r => {
+    const chip = r.retrieval_ok === null || r.retrieval_ok === undefined
+      ? '<span class="chip na">N/A</span>'
+      : (r.retrieval_ok ? '<span class="chip pass">PASS</span>' : '<span class="chip miss">MISS</span>');
+    const j = "judged_correct" in r
+      ? (r.judged_correct ? ' <span class="chip pass">✓</span>' : ' <span class="chip miss">✗</span>') : "";
+    return `<div class="row">${chip}<span class="qid">${r.question_id}</span>` +
+      `<span class="qt">${(r.question || "").replace(/</g,"&lt;")}</span>` +
+      `<span class="ms">${Math.round(r.recall_ms)}ms${j}</span></div>`;
+  }).join("");
+}
+tick(); setInterval(tick, 3000);
+</script>
+</body>
+</html>

@@ -119,7 +119,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <tr><td>engram profile</td><td>show the consolidated user profile</td></tr>
 <tr><td>engram stats</td><td>store counts, queue depth, degraded-recall counter</td></tr>
 <tr><td>engram bench [-n N]</td><td>measure embed + recall latency on your machine</td></tr>
-<tr><td>engram lme --n 100</td><td>LongMemEval-S subset harness: per-question fresh store, deterministic retrieval scoring, configurable judge (see BENCHMARKS.md)</td></tr>
+<tr><td>engram lme --n 100</td><td>LongMemEval-S subset harness: per-question fresh store, deterministic retrieval scoring, configurable judge (see BENCHMARKS.md). <code>--watch PORT</code> serves a live progress dashboard while it runs</td></tr>
 <tr><td>engram eval [--model M]</td><td>the built-in memory regression scenario: seeds a throwaway store over a scripted multi-session conversation, then scores retrieval and answers on 10 probes</td></tr>
 <tr><td>engram lapse 72h</td><td>advance the decay clock (testing/demos) - accepts 30m / 72h / 45d</td></tr>
 <tr><td>engram import file.md</td><td>bootstrap memories from a notes file (e.g. an agent's MEMORY.md), backdated so they neither flood recall nor arrive decayed</td></tr>
