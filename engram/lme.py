@@ -207,6 +207,31 @@ async def _ingest(
     return stats, sessions_of
 
 
+def _answer_prompt(block, question_date: str, question: str) -> tuple[str, str]:
+    """The answer prompt teaches the model to USE the block's structure:
+    dated lines for temporal arithmetic, counting across lines for
+    aggregates, reasoning before a final answer line. This is harness
+    scaffolding, not product behavior - Engram injects memories, the
+    client owns its prompt - so measuring with a prompt that ignores the
+    dates mismeasures the blocks."""
+    system = (
+        "You are an assistant answering from your memory of past"
+        " conversations with this user.\n\n"
+        + (f"{block}\n\n" if block else "(no relevant memories were found)\n\n")
+        + "Rules:\n"
+        "- Memory lines start with their date [YYYY-MM-DD]. Use those dates"
+        " for any 'when' or 'how long ago' arithmetic.\n"
+        "- For 'how many' or 'total' questions, count or add across ALL"
+        " relevant memory lines before answering.\n"
+        "- Think through the relevant memories briefly, then give a final"
+        " line starting with 'Answer:'.\n"
+        "- If the memories do not contain the needed information, finish"
+        " with 'Answer: I don't know'."
+    )
+    user = f"Today is {question_date}. {question}"
+    return system, user
+
+
 def _api_key() -> str:
     key = os.environ.get("LME_API_KEY") or os.environ.get("MINIMAX_API_KEY", "")
     if not key:
@@ -337,9 +362,12 @@ async def run(cfg: Config, args) -> None:
                 ing, sessions_of = await _ingest(store, rec, cfg, q)
 
                 t0 = time.perf_counter()
+                limits = cfg.tier_l_budget
+                if args.budget:
+                    g, t, tok = (int(x) for x in args.budget.split(","))
+                    limits = (g, t, tok)
                 block, debug = await rec.recall(
-                    q["question"], "__lme__", dry_run=True,
-                    limits=cfg.tier_l_budget,
+                    q["question"], "__lme__", dry_run=True, limits=limits,
                 )
                 recall_ms = (time.perf_counter() - t0) * 1000
 
@@ -354,20 +382,15 @@ async def run(cfg: Config, args) -> None:
                     None if abstention else bool(shown_sessions & evidence)
                 )
 
-                system = (
-                    "You are an assistant with a memory of past conversations"
-                    " with this user."
-                    + (f"\n\n{block}" if block else "")
-                    + "\nAnswer from these memories. If they do not contain"
-                    " the answer, say you do not know. Be brief."
-                )
-                user = f"Today is {q.get('question_date', '')}. {q['question']}"
+                system, user = _answer_prompt(
+                    block, q.get("question_date", ""), q["question"])
                 hyp = await _chat(http, args.answer_api, args.answer_base
                                   or cfg.services_url, args.answer_model,
-                                  system, user)
+                                  system, user, n_predict=420)
                 rows.append({
                     "question_id": qid, "type": q["question_type"],
                     "abstention": abstention, "question": q["question"],
+                    "question_date": q.get("question_date", ""),
                     "gold": str(q["answer"]), "hypothesis": hyp,
                     "block": block, "block_present": block is not None,
                     "retrieval_ok": retrieval_ok, "recall_ms": recall_ms,
@@ -379,6 +402,7 @@ async def run(cfg: Config, args) -> None:
             _write_atomic(out_path, {
                 "config": {"n": args.n, "answer_api": args.answer_api,
                            "answer_model": args.answer_model,
+                           "budget": args.budget or "tier-l",
                            "data": str(args.data)}, "rows": rows})
 
     if not args.no_judge:
@@ -395,18 +419,12 @@ async def reanswer(cfg: Config, args) -> None:
     data = json.loads(out_path.read_text())
     async with aiohttp.ClientSession() as http:
         for i, row in enumerate(data["rows"], 1):
-            block = row.get("block")
-            system = (
-                "You are an assistant with a memory of past conversations"
-                " with this user."
-                + (f"\n\n{block}" if block else "")
-                + "\nAnswer from these memories. If they do not contain"
-                " the answer, say you do not know. Be brief."
-            )
-            user = f"Today is {row.get('question_date', '')}. {row['question']}"
+            system, user = _answer_prompt(
+                row.get("block"), row.get("question_date", ""),
+                row["question"])
             row["hypothesis"] = await _chat(
                 http, args.answer_api, args.answer_base or cfg.services_url,
-                args.answer_model, system, user)
+                args.answer_model, system, user, n_predict=420)
             row.pop("judged_correct", None)
             row.pop("judge_model", None)
             data["config"]["answer_model"] = args.answer_model
@@ -497,6 +515,9 @@ def add_parser(sub) -> None:
                     default="ollama")
     sp.add_argument("--judge-base", default="")
     sp.add_argument("--judge-model", default="qwen3:1.7b")
+    sp.add_argument("--budget", default="", metavar="G,T,TOK",
+                    help="override injection budget (gists,titles,tokens),"
+                         " e.g. 12,8,3500 - for ablations against tier L")
     sp.add_argument("--watch", type=int, default=0, metavar="PORT",
                     help="serve a live progress dashboard on this port")
     sp.add_argument("--no-judge", action="store_true")
