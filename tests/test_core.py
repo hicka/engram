@@ -611,6 +611,73 @@ def test_snapshot_adopt_race():
         assert s.max_cosine(va)[0] != a
 
 
+def test_openai_upstream_routing():
+    import asyncio
+    import tempfile
+
+    import aiohttp
+    from aiohttp import web as aioweb
+
+    from engram.config import Config
+    from engram.proxy import make_app
+
+    async def go():
+        hits = {"cloud": [], "local": []}
+
+        def stub(name):
+            async def h(request):
+                hits[name].append(request.path)
+                return aioweb.json_response(
+                    {"choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                     "data": [], "message": {"content": "ok"}, "done": True}
+                )
+            app = aioweb.Application()
+            app.router.add_route("*", "/{tail:.*}", h)
+            return app
+
+        async def serve(app):
+            runner = aioweb.AppRunner(app)
+            await runner.setup()
+            site = aioweb.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            return runner, site._server.sockets[0].getsockname()[1]
+
+        cloud_r, cloud_port = await serve(stub("cloud"))
+        local_r, local_port = await serve(stub("local"))
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Config()
+            cfg.db_path = Path(d) / "t.db"
+            cfg.upstream = f"http://127.0.0.1:{local_port}"
+            cfg.openai_upstream = f"http://127.0.0.1:{cloud_port}"
+            cfg.services_url = f"http://127.0.0.1:{local_port}"
+            proxy_r, proxy_port = await serve(make_app(cfg))
+            base = f"http://127.0.0.1:{proxy_port}"
+            async with aiohttp.ClientSession() as http:
+                # OpenAI chat + companions follow the cloud upstream
+                await http.post(f"{base}/v1/chat/completions", json={
+                    "model": "m", "stream": False,
+                    "messages": [{"role": "user", "content": "hello there friend"}],
+                }, headers={"X-Engram": "off"})
+                await http.get(f"{base}/v1/models")
+                # embeddings deliberately stay local even with a cloud upstream
+                await http.post(f"{base}/v1/embeddings", json={"input": "x"})
+                # Ollama-native chat stays local no matter what
+                await http.post(f"{base}/api/chat", json={
+                    "model": "m", "stream": False,
+                    "messages": [{"role": "user", "content": "hello there friend"}],
+                }, headers={"X-Engram": "off"})
+            await proxy_r.cleanup()
+        await cloud_r.cleanup()
+        await local_r.cleanup()
+        assert "/v1/chat/completions" in hits["cloud"], hits
+        assert "/v1/models" in hits["cloud"], hits
+        assert "/v1/embeddings" in hits["local"], hits
+        assert "/api/chat" in hits["local"], hits
+        assert "/v1/chat/completions" not in hits["local"], hits
+
+    asyncio.run(go())
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

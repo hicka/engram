@@ -165,6 +165,13 @@ def make_app(cfg: Config) -> web.Application:
     app.router.add_route("*", "/v1/messages/{rest:.+}", handle_anthropic_passthrough)
     app.router.add_route("*", "/{prefix:.+}/v1/messages/{rest:.+}", handle_anthropic_passthrough)
     app.router.add_route("*", "/{prefix:.+}/v1/models{rest:(/.*)?}", handle_anthropic_passthrough)
+    # Bare /v1/models follows the OpenAI upstream when one is set (chat
+    # clients discover models there; a local list would be split-brained).
+    # /v1/embeddings and /v1/completions deliberately stay LOCAL even with a
+    # cloud upstream: local RAG and FIM pipelines use them against Ollama
+    # today, most chat-only cloud providers cannot serve them, and keeping
+    # embeddings local is the whole design.
+    app.router.add_route("*", "/v1/models{rest:(/.*)?}", handle_openai_passthrough)
     app.router.add_get("/engram/stats", handle_stats)
     app.router.add_get("/engram/why", handle_why)
     app.router.add_get("/engram/memories", handle_memories)
@@ -368,7 +375,15 @@ async def _handle_chat(request: web.Request, native: bool) -> web.StreamResponse
         return web.json_response({"error": "invalid JSON body"}, status=400)
 
     path = "/api/chat" if native else "/v1/chat/completions"
-    upstream_url = f"{app['cfg'].upstream}{path}"
+    # /v1/chat/completions can route to an OpenAI-compatible cloud endpoint
+    # (OpenRouter, DeepSeek, ...); Ollama-native /api/chat is local by
+    # definition. Cloud requests skip the GPU-activity gate, same as the
+    # Anthropic route: they never occupy the local GPU, and counting them
+    # would starve the summarizer under a busy bot.
+    cfg = app["cfg"]
+    base = cfg.upstream if native else (cfg.openai_upstream or cfg.upstream)
+    is_local = base == cfg.upstream
+    upstream_url = f"{base}{path}"
     # Shape guards: anything unexpected forwards untouched, memory off.
     if not isinstance(body, dict):
         body, messages = {"__raw__": body}, None
@@ -384,10 +399,13 @@ async def _handle_chat(request: web.Request, native: bool) -> web.StreamResponse
 
     # in_flight covers recall too: the summarizer must not grab the GPU while
     # a request is in its embed phase.
-    activity.in_flight += 1
+    if is_local:
+        activity.in_flight += 1
     try:
         if memory_on:
-            limits = await _tier_limits(app, str(body.get("model", "")), cloud=False)
+            limits = await _tier_limits(
+                app, str(body.get("model", "")), cloud=not is_local
+            )
             block = await _recall_block(app, user_text, session_id, limits)
             if block:
                 prompt_tokens = sum(
@@ -404,8 +422,9 @@ async def _handle_chat(request: web.Request, native: bool) -> web.StreamResponse
                 }
         resp, status, raw = await _forward_and_tee(request, upstream_url, payload)
     finally:
-        activity.in_flight -= 1
-        activity.last_done = time.time()
+        if is_local:
+            activity.in_flight -= 1
+            activity.last_done = time.time()
 
     if memory_on and status == 200:
         streamed = body.get("stream", True) if native else bool(body.get("stream"))
@@ -600,6 +619,14 @@ async def handle_passthrough(request: web.Request) -> web.StreamResponse:
     return await _passthrough_to(request, request.app["cfg"].upstream)
 
 
+async def handle_openai_passthrough(request: web.Request) -> web.StreamResponse:
+    """Bare /v1/models follows the OpenAI chat upstream when one is set, or
+    the client goes split-brained: chat answered by the cloud, model list
+    served by local Ollama. Unset = local, exactly the old behavior."""
+    cfg: Config = request.app["cfg"]
+    return await _passthrough_to(request, cfg.openai_upstream or cfg.upstream)
+
+
 async def handle_anthropic_passthrough(request: web.Request) -> web.StreamResponse:
     cfg: Config = request.app["cfg"]
     return await _passthrough_to(request, cfg.anthropic_upstream or cfg.upstream)
@@ -615,7 +642,12 @@ async def _passthrough_to(request: web.Request, base: str) -> web.StreamResponse
     )
     data = await request.read() if request.can_read_body else None
 
-    activity.in_flight += 1
+    # Cloud-bound passthroughs never occupy the local GPU; counting them in
+    # the activity gate would starve the summarizer under steady cloud
+    # traffic (a polling client alone could hold the gate shut forever).
+    is_local = base == app["cfg"].upstream
+    if is_local:
+        activity.in_flight += 1
     try:
         async with http.request(
             request.method, url, headers=headers, data=data
@@ -630,8 +662,9 @@ async def _passthrough_to(request: web.Request, base: str) -> web.StreamResponse
             await resp.write_eof()
             return resp
     finally:
-        activity.in_flight -= 1
-        activity.last_done = time.time()
+        if is_local:
+            activity.in_flight -= 1
+            activity.last_done = time.time()
 
 
 async def handle_memories(request):

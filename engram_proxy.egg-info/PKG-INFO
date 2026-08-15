@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: engram-proxy
-Version: 0.4.0
+Version: 0.5.0
 Summary: Transparent memory sidecar for local and cloud LLMs - ACT-R activation scoring, provenance-aware formation, ~90ms recall, one SQLite file
 License: MIT License
         
@@ -45,8 +45,13 @@ Give your model a memory, local or cloud. One process, one SQLite file, zero cod
 
 [![ci](https://github.com/hicka/engram/actions/workflows/ci.yml/badge.svg)](https://github.com/hicka/engram/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/engram-proxy)](https://pypi.org/project/engram-proxy/) [![docs](https://img.shields.io/badge/docs-hicka.github.io%2Fengram-46E0E6)](https://hicka.github.io/engram/) ![license](https://img.shields.io/badge/license-MIT-green)
 
-![The Engram memory observatory: memories orbiting a neural core at radii set by their live activation](https://hicka.github.io/engram/observatory.png)
+![The Engram memory observatory: memories orbiting a neural core at radii set by their live activation](https://hicka.github.io/engram/observatory.png?v=2)
 *The built-in observatory at `/engram/ui`: memories orbit by activation, reinforced ones fall inward, decaying ones drift out.*
+
+| ![A selected memory with its hebbian web lit and the full dossier panel](https://hicka.github.io/engram/shot-linked.png?v=1) | ![Hovering a mote shows its id, status, live activation, and title](https://hicka.github.io/engram/shot-hover.png?v=1) |
+|---|---|
+
+*Click a memory and its hebbian web stays lit, dossier alongside; hover any mote for its status, activation, and title.*
 
 Engram is a transparent proxy that sits between any client and Ollama. It recalls
 relevant memories from past sessions and injects them before the model answers
@@ -84,9 +89,9 @@ ollama run qwen3:1.7b "Ordering Thai tonight - anything I should avoid?"
 
 Requires Ollama with `qwen3:1.7b` (summarizer) and `qwen3-embedding:0.6b`
 (retrieval) - `ollama pull qwen3:1.7b qwen3-embedding:0.6b`, ~2 GB total.
-Field-tested defaults: a 0.6b summarizer garbles facts ("allergic to peanuts"
-became "a brave statement"), so 1.7b is the default; without it, summaries
-fall back to extractive, which also preserves facts. Set
+Field-tested defaults: sub-1B summarizers garble facts, so qwen3:1.7b is the
+default; without it, summaries fall back to extractive, which also preserves
+facts. Set
 `ENGRAM_SUMMARIZER_MODEL` / `ENGRAM_EMBED_MODEL` to override
 (`nomic-embed-text` is ~3x faster to embed but measurably worse at admission).
 
@@ -106,11 +111,12 @@ Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
 ## Design in one paragraph
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
-worker - running only when the GPU is idle - asks qwen3:0.6b for two plain
+worker - running only when the GPU is idle - asks qwen3:1.7b for two plain
 lines (`TITLE:` / `GIST:`; never JSON, with a deterministic extractive fallback)
 and embeds the gist (qwen3-embedding, Matryoshka-truncated to 256d). Recall is
-hybrid BM25 + brute-force dense with **admission on raw thresholds** (unrelated
-turns inject nothing), ranked by relevance + ACT-R activation
+hybrid BM25 + dense with **admission on raw thresholds** (unrelated turns
+inject nothing) - exact search below 50k memories, a pure-numpy IVF index past
+it (~86ms p95 at 250k traces, still embed-bound) - ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
 so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;

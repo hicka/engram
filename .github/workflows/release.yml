@@ -1,0 +1,32 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# PREREQUISITE (one-time, before pushing any v* tag): on pypi.org, project
+# engram-proxy -> Publishing -> add a trusted publisher with owner hicka,
+# repository engram, workflow release.yml, environment pypi. Without it the
+# publish step fails with invalid-publisher and the tag is half-released.
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC trusted publishing; no long-lived token anywhere
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run tests
+        run: |
+          pip install -e .
+          python tests/test_core.py
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

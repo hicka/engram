@@ -119,6 +119,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <tr><td>engram profile</td><td>show the consolidated user profile</td></tr>
 <tr><td>engram stats</td><td>store counts, queue depth, degraded-recall counter</td></tr>
 <tr><td>engram bench [-n N]</td><td>measure embed + recall latency on your machine</td></tr>
+<tr><td>engram lme --n 100</td><td>LongMemEval-S subset harness: per-question fresh store, deterministic retrieval scoring, configurable judge (see BENCHMARKS.md)</td></tr>
 <tr><td>engram eval [--model M]</td><td>the built-in memory regression scenario: seeds a throwaway store over a scripted multi-session conversation, then scores retrieval and answers on 10 probes</td></tr>
 <tr><td>engram lapse 72h</td><td>advance the decay clock (testing/demos) - accepts 30m / 72h / 45d</td></tr>
 <tr><td>engram import file.md</td><td>bootstrap memories from a notes file (e.g. an agent's MEMORY.md), backdated so they neither flood recall nor arrive decayed</td></tr>
@@ -145,6 +146,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <tr><td>ENGRAM_PORT</td><td>11435</td><td>proxy listen port</td></tr>
 <tr><td>ENGRAM_UPSTREAM</td><td>http://127.0.0.1:11434</td><td>chat forward target (OpenAI/Ollama routes)</td></tr>
 <tr><td>ENGRAM_ANTHROPIC_UPSTREAM</td><td>(empty)</td><td>where /v1/messages traffic goes - set to a cloud endpoint to give a cloud model memory</td></tr>
+<tr><td>ENGRAM_OPENAI_UPSTREAM</td><td>(empty)</td><td>where /v1/chat/completions goes - any OpenAI-compatible provider (OpenRouter, DeepSeek, ...). /v1/models follows it; /v1/embeddings and Ollama-native /api/chat always stay local</td></tr>
 <tr><td>ENGRAM_SERVICES</td><td>http://127.0.0.1:11434</td><td>local Ollama for embeddings, summarization, /api/ps - background work never leaves this</td></tr>
 <tr><td>ENGRAM_DB</td><td>~/.engram/engram.db</td><td>the store. Back it up with <code>sqlite3 … ".backup out.db"</code> (WAL mode makes bare cp copies stale)</td></tr>
 <tr><td>ENGRAM_EMBED_MODEL</td><td>qwen3-embedding:0.6b</td><td>retrieval embedder. nomic-embed-text is ~3× faster but measurably worse at telling related from unrelated cues</td></tr>
@@ -216,9 +218,18 @@ http://127.0.0.1:11435/anthropic</code></pre>
   <img src="shot-hover.png" alt="Hovering a mote shows a tooltip with its id, status, live activation, and title" style="display:block;width:100%;height:auto">
 </a>
 <p class="d">Hovering any mote shows its id, status, live activation, and title in place, and lights up its links; here the ember-ringed pinned trace with its web.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:16px 0 6px;max-width:820px">
+  <a href="shot-empty.png" style="display:block;border:1px solid var(--line);border-radius:5px;overflow:hidden">
+    <img src="shot-empty.png" alt="A brand new Engram observatory: a lone neural core, empty orbit rings, zero traces held" style="display:block;width:100%;height:auto">
+  </a>
+  <a href="shot-loaded.png" style="display:block;border:1px solid var(--line);border-radius:5px;overflow:hidden">
+    <img src="shot-loaded.png" alt="The same observatory lived in: 28 memories orbiting the core, hebbian filaments between them, silent history at the rim" style="display:block;width:100%;height:auto">
+  </a>
+</div>
+<p class="d">Day one and lived in. A fresh store is a lone core over empty orbits; every conversation after that grows the constellation - memories fall inward as they prove useful, links form between the ones recalled together, and the ones that stop mattering dim toward the rim instead of disappearing. The counters top right tell the story at a glance (demo data).</p>
 
 <h2 id="cloud">Cloud models</h2>
-<p>Set <code>ENGRAM_ANTHROPIC_UPSTREAM</code> and point your client's Anthropic base_url at <code>http://127.0.0.1:11435/anthropic</code>. Chat goes to the cloud; embeddings, summarization, and consolidation stay on local Ollama, so the only added cloud cost is the injected block (≤2000 tokens on the cloud tier, typically far less - around 1% of a real agent prompt). Your memory store never leaves your machine.</p>
+<p>Both cloud protocols work, independently or together. Set <code>ENGRAM_ANTHROPIC_UPSTREAM</code> and point your client's Anthropic base_url at <code>http://127.0.0.1:11435/anthropic</code>, or set <code>ENGRAM_OPENAI_UPSTREAM</code> to any OpenAI-compatible provider (OpenRouter, DeepSeek, Groq, ...) and point the client's OpenAI base_url at <code>http://127.0.0.1:11435/v1</code>. Chat goes to the cloud; embeddings, summarization, and consolidation stay on local Ollama, so the only added cloud cost is the injected block (≤2000 tokens on the cloud tier, typically far less - around 1% of a real agent prompt). Your memory store never leaves your machine.</p>
 
 <h2 id="troubleshooting">Troubleshooting</h2>
 <div class="tbl"><table>

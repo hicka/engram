@@ -280,7 +280,22 @@ class Recall:
                 for j in range(i + 1, min(len(shown), 4)):
                     self.store.add_link(shown[i], shown[j], 0.1)
 
-        debug = [{k: v for k, v in c.items() if k != "_emb"} for c in scored[:12]]
+        # Debug carries a "shown" flag per candidate: True = this trace was
+        # actually rendered into the block (render can drop admitted traces
+        # via near-dup suppression or budget; scoring top-12 is NOT the block).
+        # Any shown trace outside the top 12 is appended so the debug list is
+        # always a superset of what the model saw - eval harnesses depend on
+        # this being exact.
+        shown_set = set(shown)
+        debug_rows = scored[:12]
+        seen = {c["id"] for c in debug_rows}
+        debug_rows = debug_rows + [
+            c for c in scored[12:] if c["id"] in shown_set and c["id"] not in seen
+        ]
+        debug = [
+            {**{k: v for k, v in c.items() if k != "_emb"}, "shown": c["id"] in shown_set}
+            for c in debug_rows
+        ]
         if not dry_run:
             self.store.set_meta(
                 "last_recall",

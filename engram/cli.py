@@ -311,6 +311,9 @@ def main():
     sp.add_argument("duration", help="e.g. 30m, 72h, 45d")
     sp = sub.add_parser("import", help="import memories from a markdown notes file")
     sp.add_argument("file")
+    from . import lme as _lme
+
+    _lme.add_parser(sub)
 
     args = p.parse_args()
     cfg = Config()
@@ -327,7 +330,7 @@ def main():
         "up": cmd_up, "list": cmd_list, "recall": cmd_recall,
         "why": cmd_why, "stats": cmd_stats, "bench": cmd_bench,
         "eval": cmd_eval, "mcp": cmd_mcp, "profile": cmd_profile,
-        "lapse": cmd_lapse, "import": cmd_import,
+        "lapse": cmd_lapse, "import": cmd_import, "lme": _lme.main,
     }[args.cmd](cfg, args)
 
 

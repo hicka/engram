@@ -12,6 +12,11 @@ class Config:
     # OpenAI/Ollama traffic keeps hitting the local upstream. Empty = use
     # `upstream` for everything.
     anthropic_upstream: str = os.environ.get("ENGRAM_ANTHROPIC_UPSTREAM", "")
+    # Same idea for OpenAI-protocol traffic (/v1/chat/completions): set to
+    # e.g. https://openrouter.ai/api or https://api.deepseek.com and any
+    # OpenAI-compatible cloud model gets memory. Ollama-native /api/chat
+    # always stays local (that protocol IS local).
+    openai_upstream: str = os.environ.get("ENGRAM_OPENAI_UPSTREAM", "")
     # Embeddings, summarization, and /api/ps always run against local Ollama,
     # so cloud chat never adds background API cost.
     services_url: str = os.environ.get("ENGRAM_SERVICES", "http://127.0.0.1:11434")
@@ -113,6 +118,7 @@ class Config:
     def __post_init__(self):
         self.upstream = self.upstream.rstrip("/")
         self.anthropic_upstream = self.anthropic_upstream.rstrip("/")
+        self.openai_upstream = self.openai_upstream.rstrip("/")
         self.services_url = self.services_url.rstrip("/")
 
     # write path

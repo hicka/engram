@@ -107,7 +107,7 @@
     <div class="card"><h3>PROVENANCE</h3><p>Every memory knows whose words it came from: <b>user</b>, <b>observed third parties</b>, or framework plumbing. Imperatives from strangers never earn salience - that grammar is what injection attacks look like.</p></div>
     <div class="card"><h3>CORRECTIONS SUPERSEDE</h3><p>"Actually it's X now" silences the stale memory instead of feeding it. History stays auditable; temporal questions stay answerable; the correction outranks.</p></div>
     <div class="card"><h3>MEMORY GRAPH</h3><p>Traces wire together - temporally, semantically, and by co-retrieval (Hebbian). Recalling one primes its neighbors next turn, with fan damping so hubs can't dominate.</p></div>
-    <div class="card"><h3>CLOUD, CHEAPLY</h3><p>Route Anthropic-protocol traffic to a cloud endpoint while embeddings and summarization stay on local Ollama. Added cloud cost: the injected block only - and cache-friendly placement keeps the provider's 5× cache-read discount.</p></div>
+    <div class="card"><h3>CLOUD, CHEAPLY</h3><p>Route Anthropic- or OpenAI-protocol traffic to any compatible cloud endpoint (MiniMax, OpenRouter, DeepSeek) while embeddings and summarization stay on local Ollama. Added cloud cost: the injected block only - and cache-friendly placement keeps the provider's 5× cache-read discount.</p></div>
     <div class="card"><h3>AGENT VERBS (MCP)</h3><p>Eight memory tools for agents that can call them: search (with history), save, correct, edit, pin, forget, profile, stats. Same store as the transparent proxy - ambient and explicit memory stay in sync.</p></div>
     <div class="card"><h3>THE OBSERVATORY</h3><p>A live brain view at <b>/engram/ui</b>: memories orbit by activation, fall inward when reinforced, drift out as they decay, flare on recall. Search with <b>/</b>. Memory you can watch.</p></div>
     <div class="card"><h3>FAILS OPEN</h3><p>Hard recall deadline; any failure forwards your request untouched. Byte-verbatim streaming, WAL crash safety, extractive fallbacks. Memory is an enhancement, never a gate.</p></div>
@@ -135,6 +135,18 @@
       </a>
       <figcaption class="dim" style="margin-top:8px">Hover any mote for its id, status, live activation, and title; its links light up while you look.</figcaption>
     </figure>
+    <figure style="margin:0">
+      <a href="shot-empty.png" style="display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden;box-shadow:0 0 40px rgba(70,224,230,0.06)">
+        <img src="shot-empty.png" alt="A brand new observatory: a lone neural core over empty orbit rings, zero traces held" style="display:block;width:100%;height:auto">
+      </a>
+      <figcaption class="dim" style="margin-top:8px">Day one: an empty store is a lone core over bare orbits, waiting.</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <a href="shot-loaded.png" style="display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden;box-shadow:0 0 40px rgba(70,224,230,0.06)">
+        <img src="shot-loaded.png" alt="The same observatory lived in: a constellation of memories around the core, filaments between co-recalled ones" style="display:block;width:100%;height:auto">
+      </a>
+      <figcaption class="dim" style="margin-top:8px">Lived in: the constellation your conversations grow - close means hot, filaments mean recalled together, the rim is history.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -152,7 +164,11 @@ base_url = "http://127.0.0.1:11435/v1"
 
 <span class="c"># Anthropic-protocol cloud (e.g. MiniMax) with local memory</span>
 ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io engram up
-<span class="c"># then point the client at http://127.0.0.1:11435/anthropic</span></pre>
+<span class="c"># then point the client at http://127.0.0.1:11435/anthropic</span>
+
+<span class="c"># OpenAI-protocol cloud (OpenRouter, DeepSeek, ...) with local memory</span>
+ENGRAM_OPENAI_UPSTREAM=https://openrouter.ai/api engram up
+<span class="c"># then point the client at http://127.0.0.1:11435/v1</span></pre>
   <p class="dim" style="margin-top:14px">Step-by-step recipes: <a href="integrations.html">the Hermes Agent and OpenClaw integration guide</a>. Requires <a href="https://ollama.com">Ollama</a> with <code>qwen3:1.7b</code> + <code>qwen3-embedding:0.6b</code> (~2 GB total) for background summarization and retrieval - even when your chat model is in the cloud.</p>
 </section>
 

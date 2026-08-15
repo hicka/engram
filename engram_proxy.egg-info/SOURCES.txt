@@ -4,6 +4,7 @@ pyproject.toml
 engram/__init__.py
 engram/__main__.py
 engram/activation.py
+engram/ann.py
 engram/cli.py
 engram/config.py
 engram/eval.py

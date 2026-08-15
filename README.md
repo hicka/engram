@@ -63,6 +63,7 @@ engram recall "query"   dry-run recall with per-candidate scores
 engram why              explain the last injection, score by score
 engram stats            store counts, queue depth, degraded recalls
 engram bench            measure embed + recall latency on your machine
+engram lme              LongMemEval-S subset run (dataset auto-detected in .lme/)
 ```
 
 Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
@@ -99,12 +100,15 @@ Engram can give a cloud model the same memory, with background work staying
 local and free:
 
 ```bash
-# route Anthropic-protocol traffic (/v1/messages) to a cloud endpoint;
-# OpenAI/Ollama routes keep hitting local Ollama
-ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io .venv/bin/python -m engram up
+# route Anthropic-protocol traffic (/v1/messages) to a cloud endpoint,
+# or OpenAI-protocol traffic (/v1/chat/completions) to any OpenAI-compatible
+# provider; whichever you skip keeps hitting local Ollama
+ENGRAM_ANTHROPIC_UPSTREAM=https://api.minimax.io engram up
+ENGRAM_OPENAI_UPSTREAM=https://openrouter.ai/api engram up
 
-# point your client's Anthropic base_url at Engram, e.g. Hermes Agent + MiniMax:
-#   MINIMAX_BASE_URL=http://127.0.0.1:11435/anthropic
+# point your client's base_url at Engram:
+#   Anthropic protocol (e.g. Hermes + MiniMax): MINIMAX_BASE_URL=http://127.0.0.1:11435/anthropic
+#   OpenAI protocol (OpenRouter, DeepSeek, ...): base_url=http://127.0.0.1:11435/v1
 ```
 
 Auth headers pass through untouched; embeddings and summarization always run
@@ -116,7 +120,7 @@ provider prompt caches - and their cache-read discounts - survive.
 ## Endpoints
 
 - `POST /api/chat` - Ollama-native NDJSON, memory-enabled
-- `POST /v1/chat/completions` - OpenAI-compatible SSE, memory-enabled
+- `POST /v1/chat/completions` - OpenAI-compatible SSE, memory-enabled (local or cloud upstream)
 - `POST [/prefix]/v1/messages` - Anthropic Messages (local or cloud upstream), memory-enabled
 - everything else (`/api/generate`, `/api/tags`, `/api/show`, `/v1/models`, embeddings) - byte passthrough
 - `GET /engram/stats`, `GET /engram/why` - local introspection
