@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: engram-proxy
-Version: 0.6.0
+Version: 0.7.0
 Summary: Transparent memory sidecar for local and cloud LLMs - ACT-R activation scoring, provenance-aware formation, ~90ms recall, one SQLite file
 License: MIT License
         
@@ -109,10 +109,21 @@ engram lme              LongMemEval-S subset run (dataset auto-detected in .lme/
 
 Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md). Headline:
 **LongMemEval-S, all 500 questions: 98.1% evidence retrieval** into a
-2000-token block against 115k-token haystacks; 62.8% judged answers with a
-frontier answering model, comparable to published full-context results at
-a fraction of the tokens. Losing categories and all 9 retrieval misses
-published.
+~2300-token block against 115k-token haystacks; **66.4% judged answers**
+with a frontier answering model, above published full-context frontier
+results at roughly 2% of the tokens. Losing categories and all 9 retrieval
+misses published.
+
+Why answers trail retrieval, measured and ranked in BENCHMARKS.md: the
+benchmark ingests with extractive summaries whose truncation loses details
+at write time (21 of 37 analyzed misses; doubling the block budget
+recovered nothing, so it is not a selection problem), the answering
+model's own reading ability (same blocks: 62.8% frontier vs 33.8% for a
+1.7B), the deliberate user-fact-primacy trade (assistant-side knowledge
+forms weakly because that grammar is what memory poisoning looks like),
+and consolidation never running inside a benchmark that never idles.
+Production's LLM summarizer distills instead of truncating, so the
+published number is a floor for the real write path.
 
 ## Design in one paragraph
 
@@ -125,7 +136,9 @@ inject nothing) - exact search below 50k memories, a pure-numpy IVF index past
 it (~86ms p95 at 250k traces, still embed-bound) - ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
-so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;
+so the rich-get-richer loop stays closed. On big-budget tiers each rendered
+gist quotes cue-relevant verbatim sentences from its source episode (the gist
+indexes, the record testifies), user words only, secrets never travel. Idle-time consolidation maintains a user profile and topic summaries;
 silent memories resurrect on strong cues. Injection is budgeted for small
 models: ≤2 gists + 2 titles, ≤350 tokens, placed first in the system message.
 Failures fail open: a slow or broken pipeline degrades to a plain proxy.

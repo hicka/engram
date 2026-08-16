@@ -88,7 +88,9 @@ published number is a floor for the real write path.
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
 worker - running only when the GPU is idle - asks qwen3:1.7b for two plain
-lines (`TITLE:` / `GIST:`; never JSON, with a deterministic extractive fallback)
+lines (`TITLE:` / `GIST:`; never JSON, with a deterministic extractive
+fallback). Gists are fact-dense: every name, number, and date the user stated
+survives as its own clause, no filler prose
 and embeds the gist (qwen3-embedding, Matryoshka-truncated to 256d). Recall is
 hybrid BM25 + dense with **admission on raw thresholds** (unrelated turns
 inject nothing) - exact search below 50k memories, a pure-numpy IVF index past

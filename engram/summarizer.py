@@ -23,12 +23,14 @@ _THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL)
 
 SYSTEM_PROMPT = (
     "You compress one chat exchange into memory notes about what the USER"
-    " stated. Copy the user's names, numbers, and facts EXACTLY as written -"
-    " never generalize. Ignore the assistant's advice, opinions, and"
+    " stated. Copy the user's names, numbers, dates, and values EXACTLY as"
+    " written - never generalize, and never drop a fact because another one"
+    " seems more important. Ignore the assistant's advice, opinions, and"
     " elaboration; the assistant text is only context. Reply with exactly two"
     " lines:\n"
     "TITLE: <at most 10 words naming the user's key fact>\n"
-    "GIST: <at most 100 words restating the user's facts with exact names and values>"
+    "GIST: <at most 60 words: every concrete fact the user stated, packed as"
+    " short clauses separated by semicolons, no filler words>"
 )
 
 # One-shot example: small models follow demonstrations far better than rules.
@@ -54,8 +56,22 @@ TWO_SHOT_USER = (
 )
 TWO_SHOT_REPLY = (
     "TITLE: Priya set a hard March 3rd deadline for the audit report\n"
-    "GIST: Priya needs the audit report finished by March 3rd; the user called"
-    " it a hard deadline."
+    "GIST: Priya needs the audit report finished by March 3rd; hard deadline"
+    " per the user."
+)
+# Third demonstration: MULTI-FACT packing. The failure mode this trains away
+# is a small model keeping the headline fact and dropping the rest; every
+# value in the exchange must survive into the gist as its own clause.
+THREE_SHOT_USER = (
+    "USER said: Trip's booked, flying to Osaka April 14th, back on the 21st,"
+    " budget is $2,400 and my sister Mira joins for the last 3 days\n"
+    "ASSISTANT said: Sounds wonderful! Osaka in April is cherry blossom"
+    " season, you might also enjoy day trips to Nara..."
+)
+THREE_SHOT_REPLY = (
+    "TITLE: Osaka trip booked April 14th to 21st, Mira joining\n"
+    "GIST: Flying to Osaka April 14th, returning April 21st; budget $2,400;"
+    " sister Mira joins for the last 3 days."
 )
 
 
@@ -359,6 +375,8 @@ class Summarizer:
                             {"role": "assistant", "content": ONE_SHOT_REPLY},
                             {"role": "user", "content": TWO_SHOT_USER},
                             {"role": "assistant", "content": TWO_SHOT_REPLY},
+                            {"role": "user", "content": THREE_SHOT_USER},
+                            {"role": "assistant", "content": THREE_SHOT_REPLY},
                             {"role": "user", "content": prompt},
                         ],
                     },

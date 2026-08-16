@@ -151,7 +151,7 @@ http://127.0.0.1:11435/anthropic</code></pre>
 <tr><td>ENGRAM_SERVICES</td><td>http://127.0.0.1:11434</td><td>local Ollama for embeddings, summarization, /api/ps - background work never leaves this</td></tr>
 <tr><td>ENGRAM_DB</td><td>~/.engram/engram.db</td><td>the store. Back it up with <code>sqlite3 … ".backup out.db"</code> (WAL mode makes bare cp copies stale)</td></tr>
 <tr><td>ENGRAM_EMBED_MODEL</td><td>qwen3-embedding:0.6b</td><td>retrieval embedder. nomic-embed-text is ~3× faster but measurably worse at telling related from unrelated cues</td></tr>
-<tr><td>ENGRAM_SUMMARIZER_MODEL</td><td>qwen3:1.7b</td><td>gist writer. Sub-1B models destroy facts and are unsupported; a missing model falls back to extractive summaries</td></tr>
+<tr><td>ENGRAM_SUMMARIZER_MODEL</td><td>qwen3:1.7b</td><td>gist writer (fact-dense: every stated name, number, and date survives as its own clause). Sub-1B models destroy facts and are unsupported; a missing model falls back to extractive summaries</td></tr>
 <tr><td>ENGRAM_PROFILE_MODEL</td><td>(summarizer)</td><td>model for profile consolidation</td></tr>
 <tr><td>ENGRAM_QUARANTINE</td><td>(empty)</td><td>comma-separated source labels never injected, e.g. <code>observed</code> (all third-party) or <code>observed:Ops Team</code></td></tr>
 <tr><td>ENGRAM_EXPAND_MIN</td><td>1000</td><td>token-budget floor for evidence expansion (verbatim episode quotes under each gist on big tiers); 0 disables</td></tr>
