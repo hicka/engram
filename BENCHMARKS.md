@@ -141,20 +141,35 @@ excluded from retrieval (their "evidence" sessions deliberately lack the
 answer, so no retrieval verdict is meaningful) and judged on declining.
 
 Full run, all 500 questions, both answering models over byte-identical
-blocks (the two runs' retrieval columns matched exactly):
+blocks, with evidence expansion (the v0.7 default: each rendered gist
+quotes cue-relevant verbatim sentences from its source episode, strictly
+from leftover budget). Retrieval reproduced identically across four
+independent 500-question ingestions:
 
 | category | retrieval | answer: MiniMax-M3 | answer: qwen3:1.7b |
 |---|---|---|---|
-| knowledge-update | 72/72 | 56/78 | 31/78 |
-| multi-session | 121/121 | 68/133 | 33/133 |
-| single-session-user | 63/64 | 58/70 | 45/70 |
-| temporal-reasoning | 124/127 | 91/133 | 32/133 |
-| single-session-assistant | 53/56 | 21/56 | 20/56 |
-| single-session-preference | 28/30 | 20/30 | 8/30 |
-| **total** | **461/470 (98.1%)** | **314/500 (62.8%)** | **169/500 (33.8%)** |
+| knowledge-update | 72/72 | 62/78 | 42/78 |
+| multi-session | 121/121 | 78/133 | 32/133 |
+| single-session-user | 63/64 | 60/70 | 46/70 |
+| temporal-reasoning | 124/127 | 94/133 | 33/133 |
+| single-session-assistant | 53/56 | 24/56 | 21/56 |
+| single-session-preference | 28/30 | 14/30 | 5/30 |
+| **total** | **461/470 (98.1%)** | **332/500 (66.4%)** | **179/500 (35.8%)** |
 
-Abstention: MiniMax-M3 correctly declined 24/30; qwen3:1.7b 16/30.
-Recall p50 was 96ms across five hundred ~210-trace stores.
+Abstention: MiniMax-M3 correctly declined 23/30; qwen3:1.7b 17/30.
+Recall p50 was 99ms across five hundred ~210-trace stores, evidence
+expansion included.
+
+The expansion ablation, at full scale: the identical protocol WITHOUT
+evidence expansion (v0.6) scored 314/500 (62.8%) for MiniMax-M3 and
+169/500 (33.8%) for qwen3:1.7b. Expansion is worth +18 frontier answers,
+concentrated exactly where the mechanism predicts: multi-session +10 and
+knowledge-update +6 (the categories that need exact details across dated
+lines). single-session-preference regressed 20 to 14 - verbatim episode
+detail seems to distract from broad preference synthesis on that small
+category (n=30), noted rather than hidden. The budget ablation stands in
+contrast: doubling the block WITHOUT expansion had moved nothing (59 vs
+61 per 100). Content beats capacity.
 
 Reading, honestly:
 
@@ -169,17 +184,19 @@ Reading, honestly:
   and 1 paraphrase that fell below the admission threshold - the only
   empty block in 500 questions.
 - The answer column is bounded by what the answering model can do with a
-  correct block: same blocks, 63% for a frontier-class model vs 34% for a
+  correct block: same blocks, 66% for a frontier-class model vs 36% for a
   1.7B. Retrieval is model-independent; reading comprehension is not.
   For context, the LongMemEval paper reports full-context frontier models
   around 60% with the entire 115k-token haystack in the window - Engram
-  reaches comparable accuracy through a 2000-token block.
+  now scores ABOVE that through a ~2300-token block, at roughly 2% of the
+  tokens per question.
 - The rest of the answer gap decomposes into four measured weaknesses,
   ranked below.
 
 ### Where the lost answers go, ranked
 
-1. **Lossy gists under extractive summarization** (the big one). The
+1. **Lossy gists under extractive summarization** (largely addressed in
+   v0.7 by evidence expansion, kept here with its history). The
    harness ingests with the extractive fallback: a verbatim truncation of
    ~60 user words plus ~40 assistant words. In 21 of 37 analyzed wrong
    answers, the needed detail was truncated inside the gist - the right
