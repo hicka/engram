@@ -28,7 +28,7 @@ Run these and act on failures:
 
 ## Phase 2: install
 
-    pip install engram-proxy
+    pip install 'engram-proxy==0.6.0'  # pin, then bump deliberately: pypi.org/project/engram-proxy
     ollama pull qwen3:1.7b qwen3-embedding:0.6b
 
 The two models (~2 GB) are the background summarizer and the retrieval
