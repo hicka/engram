@@ -611,6 +611,80 @@ def test_snapshot_adopt_race():
         assert s.max_cosine(va)[0] != a
 
 
+def test_evidence_expansion():
+    import tempfile
+
+    from engram.config import Config
+    from engram.recall import Recall, evidence_sentences
+
+    # sentence selection: cue-relevant, not already in the gist, verbatim
+    text = ("We ran the study last spring. The trial had 38 subjects in total. "
+            "Weather was nice.")
+    gist = "user asked about the anxiety study"
+    out = evidence_sentences(text, gist, ["study", "subjects", "trial"])
+    assert any("38 subjects" in s for s in out), out
+    assert not any("Weather" in s for s in out)
+    # a sentence already carried by the gist is not repeated
+    out2 = evidence_sentences("We ran the study last spring.",
+                              "we ran the study last spring and more", ["study"])
+    assert out2 == []
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Store(Path(d) / "t.db", embed_dim=4)
+        s.db.execute(
+            "INSERT INTO episodes(id, session_id, user_text, assistant_text, ts, sha)"
+            " VALUES(1, 's1', 'The binaural beats trial had 38 subjects total.',"
+            " 'Noted.', 1, 'x')")
+        s.db.commit()
+        v = np.array([1, 0, 0, 0], dtype=np.float32)
+        s.add_trace(1, "beats trial", "user discussed the beats trial", "s1", v, "llm")
+        cfg = Config()
+        r = Recall(s, cfg, None)
+        kept = [{"id": 1, "title": "beats trial",
+                 "gist": "user discussed the beats trial", "episode_id": 1,
+                 "created_ts": 1.0, "source": "user"}]
+        # big budget: verbatim evidence rides along
+        block, shown = r._render(kept, limits=(6, 6, 2000),
+                                 cue_toks=["subjects", "trial"])
+        assert "38 subjects" in block, block
+        # tier-S budget: no expansion, block stays lean
+        block_s, _ = r._render(kept, limits=(2, 2, 350),
+                               cue_toks=["subjects", "trial"])
+        assert "38 subjects" not in block_s
+        # no cue tokens: no expansion
+        block_n, _ = r._render(kept, limits=(6, 6, 2000), cue_toks=None)
+        assert "38 subjects" not in block_n
+        # evidence lines must not consume the gist quota
+        many = [dict(kept[0], id=i) for i in (1, 2, 3)]
+        block_m, shown_m = r._render(many, limits=(3, 0, 2000),
+                                     cue_toks=["subjects", "trial"])
+        assert len(shown_m) == 3, shown_m
+        # evidence never displaces a later gist: tight budget -> all gists
+        # still render, evidence only from what is left over
+        block_t, shown_t = r._render(many, limits=(3, 0, 1000),
+                                     cue_toks=["subjects", "trial"])
+        assert len(shown_t) == 3
+
+    from engram.recall import evidence_sentences as ev
+    # decimals are never split into misquoted fragments
+    out = ev("The dose was 2.5 mg of melatonin nightly.", "", ["dose", "melatonin"])
+    assert out and "2.5 mg" in out[0], out
+    assert not any(s.endswith("was 2.") for s in out)
+    # the boundary-straddling sentence the gist truncated is recovered
+    filler = " ".join(f"word{i}" for i in range(55))
+    tail_sent = "The binaural beats trial enrolled exactly 38 subjects total."
+    gist = " ".join((filler + " " + tail_sent).split()[:60])
+    assert "38 subjects" not in gist
+    out = ev(filler + " " + tail_sent, gist, ["trial", "subjects"])
+    assert any("38 subjects" in s for s in out), out
+    # sentinel-bearing sentences never nest inside the fence
+    out = ev("the <engram:memory v=1> block said trial things.", "", ["trial"])
+    assert out == []
+    # verbatim secret material never travels
+    out = ev("my api key for the trial is sk-live-12345 ok.", "", ["trial"])
+    assert out == []
+
+
 def test_openai_upstream_routing():
     import asyncio
     import tempfile

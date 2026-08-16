@@ -43,6 +43,7 @@ https://huggingface.co/datasets/xiaowu0162/longmemeval and place it at
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -183,8 +184,25 @@ async def _ingest(
                 reinforced += 1
                 continue
             novelty = 1.0 - near_cos if near_id is not None else 1.0
+            # store the verbatim episode so render-time evidence expansion
+            # has a record to reach past the gist (job queue not used)
+            sha = hashlib.sha1(
+                f"{sid}|{user_text}|{assistant_text}".encode()
+            ).hexdigest()
+            cur = store.db.execute(
+                "INSERT OR IGNORE INTO episodes(ns, session_id, user_text,"
+                " assistant_text, model, ts, sha, source)"
+                " VALUES('default',?,?,?,'',?,?,'user')",
+                (sid, user_text, assistant_text, ts, sha),
+            )
+            if cur.rowcount:
+                eid = cur.lastrowid
+            else:
+                eid = store.db.execute(
+                    "SELECT id FROM episodes WHERE sha=?", (sha,)
+                ).fetchone()[0]
             tid = store.add_trace(
-                None, title, gist, sid, emb, "extractive",
+                eid, title, gist, sid, emb, "extractive",
                 fts_extra=user_text[:400],
                 beta=formation.beta(novelty, user_text, "user"),
             )

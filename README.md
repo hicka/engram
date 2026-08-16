@@ -95,7 +95,9 @@ inject nothing) - exact search below 50k memories, a pure-numpy IVF index past
 it (~86ms p95 at 250k traces, still embed-bound) - ranked by relevance + ACT-R activation
 `B = ln(Σ w·t^-0.5)` - frequent-and-recent memories surface first, unused ones
 sink, and injection itself reinforces at only 0.15 weight (capped per session)
-so the rich-get-richer loop stays closed. Idle-time consolidation maintains a user profile and topic summaries;
+so the rich-get-richer loop stays closed. On big-budget tiers each rendered
+gist quotes cue-relevant verbatim sentences from its source episode (the gist
+indexes, the record testifies), user words only, secrets never travel. Idle-time consolidation maintains a user profile and topic summaries;
 silent memories resurrect on strong cues. Injection is budgeted for small
 models: ≤2 gists + 2 titles, ≤350 tokens, placed first in the system message.
 Failures fail open: a slow or broken pipeline degrades to a plain proxy.

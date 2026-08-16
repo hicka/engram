@@ -42,6 +42,71 @@ _STOP = frozenset(
 )
 
 
+# A terminator only ends a sentence when followed by whitespace or the end
+# of text: "2.5 mg", "v2.5", "$1.5M" must never be split into misquoted
+# fragments presented as the verbatim record.
+_SENT_RE = re.compile(r"(?:[^.!?\n]|[.!?](?!\s|$))+[.!?]*")
+# Verbatim secret material never rides to an upstream (SALIENCE_RE makes
+# these episodes the MOST recallable, which is exactly why the raw sentence
+# must not travel; the gist's summary already answers).
+_SECRET_RE = re.compile(
+    r"\b(password|passcode|secret|credential|api[_ ]?key|token)\b", re.IGNORECASE
+)
+
+
+def evidence_sentences(
+    text: str, gist: str, cue_toks: list[str], k: int = 2, max_chars: int = 220
+) -> list[str]:
+    """Cue-relevant verbatim sentences from a source episode that the gist
+    does not already carry. The gist is a lossy index over a lossless
+    record; this is how a big-budget block reaches the record. Pure token
+    arithmetic - nothing here may cost more than microseconds."""
+    scored = []
+    gist_lower = (gist or "").lower()
+    for m in _SENT_RE.finditer(text or ""):
+        sent = m.group().strip()
+        if len(sent) < 15:
+            continue
+        if "<engram:memory" in sent or "</engram:memory" in sent:
+            continue  # an echoed injection must never nest inside the fence
+        if _SECRET_RE.search(sent):
+            continue
+        # dedup on the WHOLE sentence: a prefix probe would suppress exactly
+        # the boundary-straddling sentence the extractive gist cut mid-way,
+        # whose truncated tail is the detail expansion exists to recover
+        probe = sent.lower().rstrip(".!? ")
+        if probe and probe in gist_lower:
+            continue
+        toks = set(_TOKEN_RE.findall(sent.lower()))
+        hits = sum(1 for t in cue_toks if t in toks)
+        if hits:
+            scored.append((hits, _cue_window(sent, cue_toks, max_chars)))
+    scored.sort(key=lambda x: (-x[0], len(x[1])))
+    return [sent for _, sent in scored[:k]]
+
+
+def _cue_window(sent: str, cue_toks: list[str], max_chars: int) -> str:
+    """A long unpunctuated message is one giant 'sentence'; truncating its
+    head reproduces exactly the coverage the extractive gist already has
+    and loses the tail detail again. Center the excerpt on the cue hits."""
+    if len(sent) <= max_chars:
+        return sent
+    low = sent.lower()
+    hits = [m.start() for t in cue_toks for m in re.finditer(re.escape(t), low)]
+    if not hits:
+        return sent[:max_chars]
+    mid = sum(hits) // len(hits)
+    start = max(0, min(mid - max_chars // 2, len(sent) - max_chars))
+    frag = sent[start:start + max_chars]
+    if start > 0:
+        cut = frag.find(" ")
+        frag = "..." + (frag[cut + 1:] if 0 <= cut < 40 else frag)
+    if start + max_chars < len(sent):
+        cut = frag.rfind(" ")
+        frag = (frag[:cut] if cut > len(frag) - 40 else frag) + " ..."
+    return frag
+
+
 def strip_sentinel(text: str) -> str:
     return _SENTINEL_RE.sub("", text)
 
@@ -192,6 +257,7 @@ class Recall:
             scored.append(
                 {
                     "id": tid, "title": row["title"], "gist": row["gist"],
+                    "episode_id": row["episode_id"],
                     "created_ts": row["created_ts"], "cos": round(c, 3),
                     "bm25": round(b, 2), "nmatch": nm, "activation": round(act, 2),
                     "beta": round(row["beta"] or 0.0, 2), "source": src,
@@ -267,7 +333,7 @@ class Recall:
                     best, topic_text = c, t["gist"]
 
         if kept or profile_text or topic_text:
-            block, shown = self._render(kept, profile_text, limits, topic_text)
+            block, shown = self._render(kept, profile_text, limits, topic_text, tokens)
         else:
             block, shown = None, []
         if block is not None and not dry_run:
@@ -318,6 +384,7 @@ class Recall:
     def _render(
         self, kept: list[dict], profile_text: str | None = None,
         limits: tuple | None = None, topic_text: str | None = None,
+        cue_toks: list[str] | None = None,
     ) -> tuple[str | None, list[int]]:
         """Fit admitted traces to the token budget: gist tier first, overflow
         demotes to the title tier (never silently dropped). Returns the block
@@ -328,6 +395,17 @@ class Recall:
         max_gists, max_titles, token_budget = limits or (
             self.cfg.max_gists, self.cfg.max_titles, self.cfg.token_budget
         )
+        # evidence expansion: only tiers with room for it, and only when the
+        # cue gives us something to select by
+        expand = (
+            cue_toks
+            and self.cfg.expand_min_budget
+            and token_budget >= self.cfg.expand_min_budget
+        )
+        episodes = self.store.get_episodes(
+            [c.get("episode_id") for c in kept[:max_gists]
+             if c.get("source", "user") == "user"]
+        ) if expand else {}
         header = "Background notes from past sessions (may be stale):"
         budget = token_budget - est_tokens(header) - 12
         profile_part = []
@@ -338,8 +416,10 @@ class Recall:
             profile_part.append(f"Topic summary: {topic_text}")
             budget -= est_tokens(topic_text) + 8
         lines, titles, shown = [], [], []
+        gist_slots = []  # (index in lines, candidate) for the evidence pass
+        gist_count = 0
         for c in kept:
-            if len(lines) < max_gists:
+            if gist_count < max_gists:
                 date = datetime.datetime.fromtimestamp(c["created_ts"]).strftime("%Y-%m-%d")
                 if self.store.supersedes_something(c["id"]):
                     date = f"updated {date}"
@@ -354,6 +434,9 @@ class Recall:
                     lines.append(line)
                     budget -= t
                     shown.append(c["id"])
+                    gist_count += 1
+                    if expand:
+                        gist_slots.append((len(lines) - 1, c))
                     continue
             if len(titles) < max_titles:
                 t = est_tokens(c["title"]) + 3
@@ -361,6 +444,35 @@ class Recall:
                     titles.append(c["title"])
                     budget -= t
                     shown.append(c["id"])
+        # Evidence pass, strictly from leftover budget: every admitted gist
+        # and title has already been placed, so verbatim detail can only add,
+        # never displace. User-source episodes only (allowlist: system
+        # plumbing and observed third-party text never travel verbatim), and
+        # only the user's own words - assistant text can embed relayed or
+        # generated content and stays summarized-only, per the provenance
+        # design. The 4KB cap bounds the scan (episodes are uncapped;
+        # a pasted 8MB blob must not eat the recall deadline).
+        inserts = []
+        for idx, c in gist_slots:
+            if c.get("source", "user") != "user":
+                continue
+            ep = episodes.get(c.get("episode_id"))
+            if ep is None:
+                continue
+            sents = evidence_sentences(
+                (ep["user_text"] or "")[:4000], c["gist"], cue_toks,
+                k=self.cfg.expand_sentences,
+            )
+            if not sents:
+                continue
+            ev = "  > " + " · ".join(f'"{x}"' for x in sents)
+            te = est_tokens(ev)
+            if te <= budget:
+                inserts.append((idx, ev))
+                budget -= te
+        for idx, ev in sorted(inserts, key=lambda x: -x[0]):
+            lines.insert(idx + 1, ev)
+
         if not lines and not titles and not profile_part:
             return None, []
         parts = [SENTINEL_OPEN, *profile_part]

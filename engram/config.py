@@ -79,6 +79,14 @@ class Config:
     # prompt-prefix cache (measured 90s -> ~1s per message for a 23k prompt).
     big_prompt_tokens: int = 4000
 
+    # evidence expansion: big-budget tiers reach past the gist into the
+    # verbatim episode. The gist is a lossy index over a lossless record;
+    # rendering only the index is why "more budget" used to buy nothing
+    # (measured: 12-gist blocks scored no better than 6). Applies when the
+    # tier's token budget is at least expand_min_budget; 0 disables.
+    expand_min_budget: int = int(os.environ.get("ENGRAM_EXPAND_MIN", "1000"))
+    expand_sentences: int = 2
+
     # scoring
     decay_d: float = 0.5
     act_weight: float = 0.5

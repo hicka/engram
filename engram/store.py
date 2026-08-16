@@ -525,6 +525,24 @@ class Store:
                 kept.append(t)
         return kept
 
+    def get_episodes(self, ids: list) -> dict:
+        """Verbatim USER text for evidence expansion at render time - the
+        gist indexes, the record testifies. substr in SQL: episodes are
+        uncapped (a pasted blob can be megabytes) and this runs on the
+        recall path, so only the first 4KB ever leaves the database.
+        Assistant text is deliberately absent: it can embed relayed or
+        generated content and stays summarized-only."""
+        ids = [i for i in ids if i]
+        if not ids:
+            return {}
+        q = ",".join("?" * len(ids))
+        rows = self.db.execute(
+            f"SELECT id, substr(user_text, 1, 4000) AS user_text"
+            f" FROM episodes WHERE id IN ({q})",
+            ids,
+        ).fetchall()
+        return {r["id"]: r for r in rows}
+
     def fts_search(self, tokens: list[str], k: int = 40) -> list[tuple[int, float, int]]:
         """Returns (trace_id, score, nmatch): score = -bm25 (bigger is better),
         nmatch = how many distinct query tokens the row matched. bm25 magnitudes
