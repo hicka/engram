@@ -64,6 +64,7 @@
   <a href="#observatory">The observatory</a>
   <div class="g">More</div>
   <a href="#cloud">Cloud models</a>
+  <a href="#limitations">Known weaknesses</a>
   <a href="integrations.html">Hermes / OpenClaw guide</a>
   <a href="https://github.com/hicka/engram/blob/main/skills/engram-integration/SKILL.md">Agent skill (SKILL.md)</a>
   <a href="#troubleshooting">Troubleshooting</a>
@@ -230,6 +231,16 @@ http://127.0.0.1:11435/anthropic</code></pre>
 
 <h2 id="cloud">Cloud models</h2>
 <p>Both cloud protocols work, independently or together. Set <code>ENGRAM_ANTHROPIC_UPSTREAM</code> and point your client's Anthropic base_url at <code>http://127.0.0.1:11435/anthropic</code>, or set <code>ENGRAM_OPENAI_UPSTREAM</code> to any OpenAI-compatible provider (OpenRouter, DeepSeek, Groq, ...) and point the client's OpenAI base_url at <code>http://127.0.0.1:11435/v1</code>. Chat goes to the cloud; embeddings, summarization, and consolidation stay on local Ollama, so the only added cloud cost is the injected block (≤2000 tokens on the cloud tier, typically far less - around 1% of a real agent prompt). Your memory store never leaves your machine.</p>
+
+<h2 id="limitations">Known weaknesses</h2>
+<p>Measured on LongMemEval-S (all 500 questions; full methodology and every number in <a href="https://github.com/hicka/engram/blob/main/BENCHMARKS.md">BENCHMARKS.md</a>). Retrieval reached 98.1%: the right memories almost always make the injected block. The judged answer scores (62.8% with a frontier answering model, 33.8% with a 1.7B) are bounded by four things, ranked by measured impact:</p>
+<ul>
+<li><b>1. Lossy gists under extractive summarization.</b> The benchmark ingests with the extractive fallback (verbatim truncation: ~60 user words + ~40 assistant words), because LLM-summarizing 500 x ~50 sessions takes days on a laptop. In 21 of 37 analyzed wrong answers the needed detail was truncated inside the gist - the right memory reached the block without the fact the question wanted. Doubling the injection budget recovered nothing (59 vs 61 per 100), proving the loss happens at write time, not at selection. Production's primary path is LLM summarization, which distills instead of truncating; quantifying that gap is the next planned ablation.</li>
+<li><b>2. The answering model's reading ability.</b> In the other 16 of 37, the answer was in the block and the model fumbled it. Same blocks: 62.8% frontier vs 33.8% local 1.7B. Retrieval is model-independent; comprehension is not - this is the argument for the cloud routes.</li>
+<li><b>3. User-fact primacy.</b> Knowledge that only ever appeared in the assistant's words forms weakly, by design - imperatives and facts from anyone but the user are exactly what memory poisoning looks like, so that trade is deliberate. It caps the single-session-assistant category (21/56) and is published as a property, not fixed quietly.</li>
+<li><b>4. Consolidation is not exercised by the benchmark.</b> Aggregate and preference questions are what the idle-time profile and topic schemas exist for; a benchmark run never idles, so those answers rely on point traces alone.</li>
+</ul>
+<p class="d">Retrieval's own 9 misses out of 470 are taxonomized in BENCHMARKS.md too: 3 assistant-side facts, 3 relative-date cues ("last Tuesday" - embeddings cannot do date arithmetic; date-aware cue expansion is on the roadmap), 2 vague preference cues, 1 paraphrase below the admission threshold.</p>
 
 <h2 id="troubleshooting">Troubleshooting</h2>
 <div class="tbl"><table>

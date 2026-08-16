@@ -9,6 +9,8 @@ engram/cli.py
 engram/config.py
 engram/eval.py
 engram/formation.py
+engram/lme.py
+engram/lme_watch.html
 engram/mcp.py
 engram/profile.py
 engram/proxy.py

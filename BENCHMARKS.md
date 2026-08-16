@@ -174,14 +174,39 @@ Reading, honestly:
   For context, the LongMemEval paper reports full-context frontier models
   around 60% with the entire 115k-token haystack in the window - Engram
   reaches comparable accuracy through a 2000-token block.
-- We tested whether a bigger block helps: a 12-gist / 3500-token ablation
-  scored 59/100 vs 61/100 for the standard budget on the same subset - no
-  gain. Failure analysis shows why: in 21 of 37 wrong answers the missing
-  detail was truncated inside the extractive gist, so more gists add
-  distractors, not evidence. The content bottleneck is gist quality, and
-  the daemon's primary path (LLM summarization, not used by the harness
-  for compute reasons) is the lever - quantifying that gap is the next
-  ablation.
+- The rest of the answer gap decomposes into four measured weaknesses,
+  ranked below.
+
+### Where the lost answers go, ranked
+
+1. **Lossy gists under extractive summarization** (the big one). The
+   harness ingests with the extractive fallback: a verbatim truncation of
+   ~60 user words plus ~40 assistant words. In 21 of 37 analyzed wrong
+   answers, the needed detail was truncated inside the gist - the right
+   memory reached the block without the fact the question wanted. The
+   budget ablation proves the diagnosis: a 12-gist / 3500-token block
+   scored 59/100 vs 61/100 for the standard 6 / 2000 budget. If block
+   size were the constraint, doubling it would recover answers; instead
+   more gists just add more truncated gists. The loss happens at WRITE
+   time. The daemon's primary path is LLM summarization, which distills
+   ("completed their 20th course") instead of truncating around the fact;
+   the harness cannot afford it at 500 x ~50 sessions on a laptop, so the
+   published number is a floor for the production write path. Quantifying
+   that gap on a small subset is the next planned ablation.
+2. **The answering model's reading ability.** In the other 16 of 37
+   misses, the answer was present in the block and the model fumbled it.
+   Same blocks, both columns: 62.8% frontier vs 33.8% for a 1.7B.
+   Retrieval is model-independent by construction; comprehension is not.
+3. **User-fact primacy.** Knowledge that only ever appeared in the
+   assistant's words forms weakly, by design: imperatives and facts from
+   anyone but the user are what memory poisoning looks like, so the
+   asymmetry is deliberate. It caps single-session-assistant (21/56) and
+   we publish it as a property rather than quietly special-casing the
+   benchmark.
+4. **Consolidation is not exercised.** Aggregate and preference questions
+   are what the idle-time profile and topic schemas exist for; a
+   benchmark run never idles, so those categories rely on point traces
+   alone.
 
 Deviations and limitations, in the open: ingestion uses extractive
 summaries (the documented fallback), not the LLM summarizer - at 500 x ~50

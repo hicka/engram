@@ -73,6 +73,17 @@ frontier answering model, comparable to published full-context results at
 a fraction of the tokens. Losing categories and all 9 retrieval misses
 published.
 
+Why answers trail retrieval, measured and ranked in BENCHMARKS.md: the
+benchmark ingests with extractive summaries whose truncation loses details
+at write time (21 of 37 analyzed misses; doubling the block budget
+recovered nothing, so it is not a selection problem), the answering
+model's own reading ability (same blocks: 62.8% frontier vs 33.8% for a
+1.7B), the deliberate user-fact-primacy trade (assistant-side knowledge
+forms weakly because that grammar is what memory poisoning looks like),
+and consolidation never running inside a benchmark that never idles.
+Production's LLM summarizer distills instead of truncating, so the
+published number is a floor for the real write path.
+
 ## Design in one paragraph
 
 Every exchange becomes an **episode** (verbatim, SHA-deduped). A write-behind
