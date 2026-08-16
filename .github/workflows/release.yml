@@ -30,3 +30,6 @@ jobs:
           python -m build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # a version already published by hand (twine) must not fail the tag
+          skip-existing: true
