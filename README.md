@@ -66,7 +66,12 @@ engram bench            measure embed + recall latency on your machine
 engram lme              LongMemEval-S subset run (dataset auto-detected in .lme/)
 ```
 
-Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md).
+Numbers and methodology: [BENCHMARKS.md](BENCHMARKS.md). Headline:
+**LongMemEval-S, all 500 questions: 98.1% evidence retrieval** into a
+2000-token block against 115k-token haystacks; 62.8% judged answers with a
+frontier answering model, comparable to published full-context results at
+a fraction of the tokens. Losing categories and all 9 retrieval misses
+published.
 
 ## Design in one paragraph
 

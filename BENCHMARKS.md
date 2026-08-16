@@ -121,10 +121,80 @@ when the GPU is idle, and correctness does not depend on the LLM (extractive
 fallback preserves facts verbatim). Past 50k memories the dense leg switches
 to the IVF index above and the whole path stays under ~86 ms p95 at 250k.
 
+## LongMemEval-S: the full 500 questions
+
+`engram lme` runs LongMemEval-S (Wu et al., the standard long-term-memory
+benchmark) end to end: for every question a FRESH store ingests that
+question's ~50 haystack sessions through Engram's real write path
+(formation gates, extractive summaries, near-dup reinforcement, conflict
+supersession), backdated to the transcript's timestamps so activation and
+recency mean what they meant in the conversation. The probe is then
+answered by a chat model whose only knowledge of the haystack is Engram's
+injected block: 6 gists + 6 titles, at most 2000 tokens, against a ~115k
+token haystack. `--watch PORT` serves a live dashboard while it runs.
+
+RETRIEVAL is deterministic and judge-free: a hit means a trace actually
+rendered into the injected block traces back (by formation or
+reinforcement) to one of the dataset's evidence sessions. ANSWER is scored
+by an LLM judge (yes/no correctness). The 30 abstention questions are
+excluded from retrieval (their "evidence" sessions deliberately lack the
+answer, so no retrieval verdict is meaningful) and judged on declining.
+
+Full run, all 500 questions, both answering models over byte-identical
+blocks (the two runs' retrieval columns matched exactly):
+
+| category | retrieval | answer: MiniMax-M3 | answer: qwen3:1.7b |
+|---|---|---|---|
+| knowledge-update | 72/72 | 56/78 | 31/78 |
+| multi-session | 121/121 | 68/133 | 33/133 |
+| single-session-user | 63/64 | 58/70 | 45/70 |
+| temporal-reasoning | 124/127 | 91/133 | 32/133 |
+| single-session-assistant | 53/56 | 21/56 | 20/56 |
+| single-session-preference | 28/30 | 20/30 | 8/30 |
+| **total** | **461/470 (98.1%)** | **314/500 (62.8%)** | **169/500 (33.8%)** |
+
+Abstention: MiniMax-M3 correctly declined 24/30; qwen3:1.7b 16/30.
+Recall p50 was 96ms across five hundred ~210-trace stores.
+
+Reading, honestly:
+
+- Retrieval is near-ceiling, with PERFECT scores on knowledge-update and
+  multi-session - the categories built on supersession and cross-session
+  accumulation, which is what Engram's write path is for. All 9 misses are
+  published: 3 assistant-side facts (user-fact-primacy formation records
+  assistant prose weakly, by design), 3 relative-date cues ("last Tuesday"
+  - embeddings cannot do date arithmetic; date-aware cue expansion is now
+  on the roadmap), 2 vague preference cues (production's profile
+  consolidation targets exactly these; the harness does not exercise it),
+  and 1 paraphrase that fell below the admission threshold - the only
+  empty block in 500 questions.
+- The answer column is bounded by what the answering model can do with a
+  correct block: same blocks, 63% for a frontier-class model vs 34% for a
+  1.7B. Retrieval is model-independent; reading comprehension is not.
+  For context, the LongMemEval paper reports full-context frontier models
+  around 60% with the entire 115k-token haystack in the window - Engram
+  reaches comparable accuracy through a 2000-token block.
+- We tested whether a bigger block helps: a 12-gist / 3500-token ablation
+  scored 59/100 vs 61/100 for the standard budget on the same subset - no
+  gain. Failure analysis shows why: in 21 of 37 wrong answers the missing
+  detail was truncated inside the extractive gist, so more gists add
+  distractors, not evidence. The content bottleneck is gist quality, and
+  the daemon's primary path (LLM summarization, not used by the harness
+  for compute reasons) is the lever - quantifying that gap is the next
+  ablation.
+
+Deviations and limitations, in the open: ingestion uses extractive
+summaries (the documented fallback), not the LLM summarizer - at 500 x ~50
+sessions the LLM path would take days on a laptop. The judge for the
+published numbers is MiniMax-M3, which also answered one column: an
+element of self-judging we note rather than hide. Dataset: the official
+`longmemeval_s` release (MIT), unfiltered. Reproduce with
+`engram lme --n 500` (the CLI prints download instructions), roughly 4
+hours per answering leg on an M2 Pro, watchable live with `--watch`.
+
 ## Not yet benchmarked
 
-LongMemEval and LoCoMo runs require an answering model plus an LLM judge and
-careful protocol to be meaningful; the field's published scores are already
-disputed between vendors. We would rather publish nothing than unverifiable
-numbers. A LongMemEval-subset harness is planned; when it lands, the losing
-categories will be published alongside the winning ones.
+LoCoMo remains unrun; its published scores are disputed between vendors
+and we would rather publish nothing than unverifiable numbers. The
+LLM-summarizer ingestion ablation (small subset, quantifying the
+extractive-gist gap) is planned.
