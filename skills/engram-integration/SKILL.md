@@ -48,7 +48,7 @@ route instead (chat goes to the cloud, memory stays local):
 
 ## Phase 4: wire the client (pick the one that matches)
 
-Back up any config file before editing: `cp CONFIG CONFIG.bak.$(date +%s)`
+Back up any config file before editing: `cp CONFIG CONFIG.bak-YYYYMMDD` (use today's date)
 
 **Stock Ollama CLI**
 
